@@ -3,3 +3,5 @@ data/
 *.json.tmp
 *.mcpb
 node_modules/
+claude-extension/server/parser.js
+dist/

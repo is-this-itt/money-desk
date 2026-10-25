@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json",
+  "manifest_version": "0.3",
+  "name": "money-desk",
+  "display_name": "Money Desk",
+  "version": "1.0.0",
+  "description": "Read-only access to your Money Desk spending data, stored on this computer.",
+  "long_description": "Lets Claude answer questions about your spending, income, investments, subscriptions and recurring payments using the transactions you imported into Money Desk. It reads the Money Desk data file on this computer and never changes it. It makes no network connections. UPI IDs and reference numbers are not included.",
+  "author": { "name": "Rushi" },
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": { "MONEY_DESK_DATA": "${user_config.data_file}" }
+    }
+  },
+  "tools": [
+    { "name": "get_summary", "description": "Spent, income, invested and saved for a period, by month and by category" },
+    { "name": "list_transactions", "description": "Individual transactions with filters for dates, account, category, text and amount" },
+    { "name": "spending_breakdown", "description": "Spending grouped by category, merchant, account or month" },
+    { "name": "find_recurring_payments", "description": "Rent, SIPs, bills and subscriptions that repeat each month" },
+    { "name": "get_accounts_and_categories", "description": "Imported accounts and date coverage, categories and saved rules" }
+  ],
+  "user_config": {
+    "data_file": {
+      "type": "file",
+      "title": "Money Desk data file",
+      "description": "Leave empty to use Documents\\money-desk\\money-desk\\data\\money-desk.json. Otherwise pick money-desk.json inside your Money Desk folder's data folder.",
+      "required": false
+    }
+  },
+  "keywords": ["finance", "budget", "spending", "india"],
+  "license": "MIT",
+  "compatibility": { "platforms": ["win32", "darwin", "linux"], "runtimes": { "node": ">=16.0.0" } }
+}
