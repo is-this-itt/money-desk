@@ -7,7 +7,8 @@ $dataDir = Join-Path $PSScriptRoot 'data'
 $dataFile = Join-Path $dataDir 'money-desk.json'
 $backupDir = Join-Path $dataDir 'backups'
 # A new random key each time the helper starts. Only the window this helper opens is given it,
-# so other programs or other users on this computer can't read or change your data.
+# so websites and other Windows accounts on this computer can't read or change your data.
+# (Programs running as you can read the data folder anyway; that is outside what this protects.)
 $keyFile = Join-Path $dataDir 'session.key'
 $maxBody = 64MB
 $keepBackups = 30

@@ -80,6 +80,8 @@ test('Card numbers written in groups are masked', () => {
   assert.strictEqual(MD.redactDesc('CARD 4111-1111-1111-1234'), 'CARD XX1234');
   assert.strictEqual(MD.redactDesc('AMEX 3782 822463 10005'), 'AMEX XX0005');
   assert.strictEqual(MD.redactDesc('TXN 25-10-2026 SWIGGY'), 'TXN 25-10-2026 SWIGGY');
+  assert.strictEqual(MD.redactDesc('DINERS 3056 930902 5904'), 'DINERS XX5904');
+  assert.strictEqual(MD.redactDesc('REF 2026 1234 5678'), 'REF 2026 1234 5678');
 });
 
 test('Saved rules win, and a __proto__ merchant cannot hijack categorisation', () => {

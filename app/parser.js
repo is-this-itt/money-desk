@@ -231,8 +231,8 @@
   function redactDesc(d) {
     return clean(d)
       .replace(/\b\d{4,6}[xX*]{4,}(\d{4})\b/g, 'XX$1')
-      // Full card numbers written in groups: 4111 1111 1111 1111, 4111-1111-1111-1111, Amex 4-6-5.
-      .replace(/\b(?:\d{4}(?:[ -]\d{4}){3}|\d{4}[ -]\d{6}[ -]\d{5})\b/g, n => 'XX' + n.slice(-4))
+      // Full card numbers written in groups (4-4-4-4, Amex 4-6-5, Diners 4-6-4): 13 to 19 digits.
+      .replace(/\b\d{4,6}(?:[ -]\d{4,6}){2,4}\b/g, n => { const d = n.replace(/\D/g, ''); return d.length >= 13 && d.length <= 19 ? 'XX' + d.slice(-4) : n; })
       .replace(/([\w.+-]+)@([a-z][a-z0-9.]*)/gi, (m, user, handle) => (user.length > 2 ? user.slice(0, 2) + '***' : '***') + '@' + handle)
       .replace(/\d{6,}/g, n => 'X'.repeat(n.length - 4) + n.slice(-4))
       .replace(/\s+/g, ' ').trim();
