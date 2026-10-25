@@ -26,6 +26,7 @@ test('read-only tools answer over stdio', async () => {
     { date: '2026-08-14', amount: -500, desc: 'SWIGGY', merchant: 'Swiggy', account: 'Card', category: 'Food & dining', id: 'a1' },
     { date: '2026-08-15', amount: 1000, desc: 'PAYMENT RECEIVED', merchant: 'Payment', account: 'Card', category: 'Card payments & transfers', id: 'a2' },
     { date: '2026-08-16', amount: -200, desc: 'x', merchant: '__proto__', account: 'Card', category: 'Other', id: 'a3' },
+    { date: '2026-08-17', amount: -50, desc: 'UPI/DR/627512345678/RAHUL/SBIN/rahul.s@oksbi/UPI', merchant: 'Rahul', account: 'Card', category: 'People (UPI)', id: 'a4' },
   ];
   fs.writeFileSync(file, JSON.stringify({ txns, rules: {}, accounts: { Card: { kind: 'card' } } }));
   const before = fs.readFileSync(file, 'utf8');
@@ -36,11 +37,18 @@ test('read-only tools answer over stdio', async () => {
     { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_summary', arguments: {} } },
     { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'spending_breakdown', arguments: { group_by: 'merchant' } } },
     { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'list_transactions', arguments: { from: 'Aug 2026' } } },
+    // Search sees only masked text, so it can't be used to guess hidden digits or UPI IDs.
+    { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'list_transactions', arguments: { search: '6275' } } },
+    { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'list_transactions', arguments: { search: 'rahul.s@' } } },
+    { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'list_transactions', arguments: { search: '5678' } } },
   ]);
   const byId = Object.fromEntries(res.map(r => [r.id, r]));
   assert.ok(byId[2].result.tools.every(t => t.annotations.readOnlyHint));
-  assert.strictEqual(byId[3].result.structuredContent.totals.spent, 700);
-  assert.deepStrictEqual(byId[4].result.structuredContent.groups.map(g => g.name).sort(), ['Swiggy', '__proto__'].sort());
+  assert.strictEqual(byId[3].result.structuredContent.totals.spent, 750);
+  assert.deepStrictEqual(byId[4].result.structuredContent.groups.map(g => g.name).sort(), ['Rahul', 'Swiggy', '__proto__'].sort());
   assert.strictEqual(byId[5].result.isError, true);
+  assert.strictEqual(byId[6].result.structuredContent.total_matching, 0);
+  assert.strictEqual(byId[7].result.structuredContent.total_matching, 0);
+  assert.strictEqual(byId[8].result.structuredContent.transactions[0].description, 'UPI/DR/XXXXXXXX5678/RAHUL/SBIN/ra***@oksbi/UPI');
   assert.strictEqual(fs.readFileSync(file, 'utf8'), before, 'data file must not change');
 });

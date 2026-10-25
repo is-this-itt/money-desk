@@ -231,6 +231,8 @@
   function redactDesc(d) {
     return clean(d)
       .replace(/\b\d{4,6}[xX*]{4,}(\d{4})\b/g, 'XX$1')
+      // Full card numbers written in groups: 4111 1111 1111 1111, 4111-1111-1111-1111, Amex 4-6-5.
+      .replace(/\b(?:\d{4}(?:[ -]\d{4}){3}|\d{4}[ -]\d{6}[ -]\d{5})\b/g, n => 'XX' + n.slice(-4))
       .replace(/([\w.+-]+)@([a-z][a-z0-9.]*)/gi, (m, user, handle) => (user.length > 2 ? user.slice(0, 2) + '***' : '***') + '@' + handle)
       .replace(/\d{6,}/g, n => 'X'.repeat(n.length - 4) + n.slice(-4))
       .replace(/\s+/g, ' ').trim();
@@ -389,7 +391,7 @@
     return res.sort((a, b) => b.monthly - a.monthly);
   }
 
-  const PARSER_VERSION = 3;
+  const PARSER_VERSION = 4;
   const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;

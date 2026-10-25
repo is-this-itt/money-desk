@@ -6,11 +6,15 @@ $root = Join-Path $PSScriptRoot 'app'
 $dataDir = Join-Path $PSScriptRoot 'data'
 $dataFile = Join-Path $dataDir 'money-desk.json'
 $backupDir = Join-Path $dataDir 'backups'
+# A new random key each time the helper starts. Only the window this helper opens is given it,
+# so other programs or other users on this computer can't read or change your data.
+$keyFile = Join-Path $dataDir 'session.key'
+$maxBody = 64MB
 $keepBackups = 30
 $port = 8789
 $prefix = "http://localhost:$port/"
 $origin = "http://localhost:$port"
-$version = '5'
+$version = '6'
 # Safety net if the window never says goodbye (for example, the browser crashed).
 $idleLimit = [TimeSpan]::FromMinutes(10)
 $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -20,7 +24,17 @@ $types = @{
   '.svg' = 'image/svg+xml'; '.css' = 'text/css'
 }
 
-function Open-Window {
+function New-Key {
+  $b = New-Object byte[] 32
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  $rng.GetBytes($b)
+  $rng.Dispose()
+  return ([BitConverter]::ToString($b) -replace '-', '').ToLower()
+}
+
+function Open-Window([string]$key) {
+  # The key goes after #, so the browser keeps it in the window and never sends it in a URL.
+  $url = "$prefix#k=$key"
   $browsers = @(
     "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
     "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
@@ -30,8 +44,8 @@ function Open-Window {
   )
   $exe = $browsers | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
   try {
-    if ($exe) { Start-Process -FilePath $exe -ArgumentList "--app=$prefix", '--window-size=1440,920' }
-    else { Start-Process $prefix }
+    if ($exe) { Start-Process -FilePath $exe -ArgumentList "--app=$url", '--window-size=1440,920' }
+    else { Start-Process $url }
   } catch { }
 }
 
@@ -53,17 +67,26 @@ function Save-DailyBackup {
     Select-Object -Skip $keepBackups | Remove-Item -Force
 }
 
+# True when the request carries this run's key: in the X-Money-Desk header, or as ?k= for the
+# keep-alive pings, which can't send headers.
+function Test-Key($req) {
+  $k = $req.Headers['X-Money-Desk']
+  if (-not $k) { $k = $req.QueryString['k'] }
+  return [bool]($k -and $k -ceq $key)
+}
+
 function Handle-Data($req, $res) {
-  # Only the Money Desk page may use the data API. The custom header forces browsers to ask
-  # permission first for any other site, which this server never grants.
+  # Only the Money Desk window may use the data API. The custom header also forces browsers to
+  # ask permission first for any other site, which this server never grants.
   $o = $req.Headers['Origin']
-  if (($o -and $o -ne $origin) -or $req.Headers['X-Money-Desk'] -ne '1') { Send-Text $res 403 'forbidden' 'text/plain'; return }
+  if (($o -and $o -ne $origin) -or -not $req.Headers['X-Money-Desk'] -or -not (Test-Key $req)) { Send-Text $res 403 'forbidden' 'text/plain'; return }
   if ($req.HttpMethod -eq 'GET') {
     if (Test-Path $dataFile) { Send-Text $res 200 ([IO.File]::ReadAllText($dataFile, $utf8)) 'application/json' }
     else { Send-Text $res 404 '{}' 'application/json' }
     return
   }
   if ($req.HttpMethod -eq 'PUT') {
+    if ($req.ContentLength64 -le 0 -or $req.ContentLength64 -gt $maxBody) { Send-Text $res 413 'too large' 'text/plain'; return }
     $reader = New-Object System.IO.StreamReader($req.InputStream, $utf8)
     $body = $reader.ReadToEnd()
     $reader.Close()
@@ -90,7 +113,11 @@ $listener = Start-Listener
 if (-not $listener) {
   # Something is already serving Money Desk. If it is this version, just open a window.
   $running = try { (Invoke-WebRequest "${prefix}__version" -UseBasicParsing -TimeoutSec 3).Content } catch { '' }
-  if ("$running".Trim() -eq $version) { Open-Window; exit }
+  if ("$running".Trim() -eq $version) {
+    $k = try { [IO.File]::ReadAllText($keyFile).Trim() } catch { '' }
+    Open-Window $k
+    exit
+  }
   # Otherwise it is an older helper: stop it and take over.
   try {
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
@@ -99,9 +126,12 @@ if (-not $listener) {
   } catch { }
   Start-Sleep -Seconds 1
   $listener = Start-Listener
-  if (-not $listener) { Open-Window; exit }
+  if (-not $listener) { exit }
 }
-Open-Window
+if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
+$key = New-Key
+[IO.File]::WriteAllText($keyFile, $key, $utf8)
+Open-Window $key
 $last = Get-Date
 $byeAt = $null
 $pages = @{}   # open Money Desk windows, by the id each page picks for itself
@@ -127,6 +157,7 @@ try {
         $site = $req.Headers['Sec-Fetch-Site']
         if ($site -and $site -ne 'same-origin') { $res.StatusCode = 403; continue }
       }
+      if (($path -eq '/__alive' -or $path -eq '/__bye') -and -not (Test-Key $req)) { $res.StatusCode = 403; continue }
       $pageId = $req.QueryString['id']
       if ($path -eq '/__alive') {
         if ($pageId) { $pages[$pageId] = Get-Date }
@@ -167,4 +198,5 @@ try {
   }
 } finally {
   $listener.Stop()
+  try { Remove-Item $keyFile -Force } catch { }
 }

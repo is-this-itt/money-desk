@@ -75,6 +75,13 @@ test('Sensitive values are masked, not removed, and ids ignore masking', () => {
   assert.ok(!a.desc.includes('627512345678') && !a.desc.includes('xy@oksbi'));
 });
 
+test('Card numbers written in groups are masked', () => {
+  assert.strictEqual(MD.redactDesc('PAYMENT TO 4111 1111 1111 1234 THANK YOU'), 'PAYMENT TO XX1234 THANK YOU');
+  assert.strictEqual(MD.redactDesc('CARD 4111-1111-1111-1234'), 'CARD XX1234');
+  assert.strictEqual(MD.redactDesc('AMEX 3782 822463 10005'), 'AMEX XX0005');
+  assert.strictEqual(MD.redactDesc('TXN 25-10-2026 SWIGGY'), 'TXN 25-10-2026 SWIGGY');
+});
+
 test('Saved rules win, and a __proto__ merchant cannot hijack categorisation', () => {
   assert.strictEqual(MD.categorize('SWIGGY', 'Swiggy', -10, { swiggy: 'Groceries' }, 'card'), 'Groceries');
   assert.strictEqual(MD.categorize('x', '__proto__', -5, {}, 'bank'), 'Other');

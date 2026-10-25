@@ -45,7 +45,7 @@ function applyFilters(txns, a) {
     (!from || t.date >= from) && (!to || t.date <= to)
     && (!acct || t.account.toLowerCase().includes(acct))
     && (!cat || t.category.toLowerCase() === cat)
-    && (!q || `${t.merchant} ${t.desc} ${t.category}`.toLowerCase().includes(q))
+    && (!q || `${t.merchant} ${MD.redactDesc(t.desc)} ${t.category}`.toLowerCase().includes(q))
     && (a.direction === 'out' ? t.amount < 0 : a.direction === 'in' ? t.amount > 0 : true)
     && (a.min_amount == null || Math.abs(t.amount) >= a.min_amount)
     && (a.max_amount == null || Math.abs(t.amount) <= a.max_amount));

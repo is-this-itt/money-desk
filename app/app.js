@@ -50,14 +50,16 @@
   // so the page opens instantly and survives if the helper is not running.
   let fileMode = false;
   let saving = null, saveAgain = false;
-  const API = { headers: { 'X-Money-Desk': '1' }, cache: 'no-store' };
+  // The helper gives the window it opens a new key each time it starts (after # in the address).
+  const HELPER_KEY = (/[#&]k=([0-9a-f]{16,128})/.exec(location.hash) || [])[1] || '';
+  const API = { headers: { 'X-Money-Desk': HELPER_KEY }, cache: 'no-store' };
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { /* cache only */ }
     if (fileMode) pushToFile();
   }
   function pushToFile() {
     if (saving) { saveAgain = true; return; }
-    saving = fetch('/api/data', { method: 'PUT', headers: { 'X-Money-Desk': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ app: 'money-desk', version: 1, savedAt: new Date().toISOString(), ...db }) })
+    saving = fetch('/api/data', { method: 'PUT', headers: { 'X-Money-Desk': HELPER_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ app: 'money-desk', version: 1, savedAt: new Date().toISOString(), ...db }) })
       .then(r => { if (!r.ok) throw new Error(r.status); $('#offline').classList.add('hidden'); })
       .catch(() => { $('#offline').classList.remove('hidden'); toast('Could not save to your data file. Your changes are kept in this window; reopen Money Desk to save them.'); })
       .finally(() => { saving = null; if (saveAgain) { saveAgain = false; pushToFile(); } });
@@ -103,6 +105,7 @@
         render();
         return;
       }
+      if (r.status === 403) { $('#offline').classList.remove('hidden'); toast('This window can\'t reach your data file. Close it and open Money Desk from its shortcut.', null, 8000); return; }
       if (!r.ok) return;
       const d = await r.json();
       fileMode = true;
@@ -716,14 +719,15 @@
   // Tells the local helper the window is still open.
   const PAGE_ID = Math.random().toString(36).slice(2, 10);
   function ping() {
-    fetch('/__alive?id=' + PAGE_ID, { cache: 'no-store' })
+    fetch('/__alive?id=' + PAGE_ID + '&k=' + HELPER_KEY, { cache: 'no-store' })
+      .then(r => { if (!r.ok) throw new Error(r.status); })
       .then(() => $('#offline').classList.add('hidden'))
       .catch(() => $('#offline').classList.remove('hidden'));
   }
   if (location.protocol.startsWith('http')) {
     ping(); setInterval(ping, 30000);
     // Closing the window lets the helper stop straight away (a reload cancels it).
-    addEventListener('pagehide', () => { try { navigator.sendBeacon('/__bye?id=' + PAGE_ID, 'bye'); } catch (e) { /* idle timeout covers it */ } });
+    addEventListener('pagehide', () => { try { navigator.sendBeacon('/__bye?id=' + PAGE_ID + '&k=' + HELPER_KEY, 'bye'); } catch (e) { /* idle timeout covers it */ } });
   }
 
   // ---------- Start ----------
