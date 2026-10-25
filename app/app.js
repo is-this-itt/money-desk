@@ -56,22 +56,22 @@
     }
     return { txns, rules, accounts, services, parserVersion: Number(d && d.parserVersion) || undefined };
   }
-  // One entry on My services, from a saved file or the form. Notes are masked like statement
-  // lines, so a pasted card or account number is never stored in full.
+  // One entry on My services, from a saved file or the form. Text fields are masked like
+  // statement lines, so a pasted card or account number is never stored in full.
   function cleanService(v, str) {
-    const name = str(v.name, 80).trim();
+    const name = MD.redactDesc(str(v.name, 80));
     if (!name) return null;
     const amount = Number(v.amount), day = Number(v.day);
     return {
       id: typeof v.id === 'string' && /^[a-z0-9]{1,20}$/.test(v.id) ? v.id : newId(),
       type: SVC_TYPES.includes(v.type) ? v.type : 'Other',
       name,
-      provider: str(v.provider, 60).trim(),
+      provider: MD.redactDesc(str(v.provider, 60)),
       last4: /^\d{4}$/.test(v.last4) ? v.last4 : '',
       amount: v.amount !== '' && v.amount != null && isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : null,
       freq: SVC_FREQ.includes(v.freq) ? v.freq : 'None',
       day: Number.isInteger(day) && day >= 1 && day <= 31 ? day : null,
-      from: str(v.from, 60).trim(),
+      from: MD.redactDesc(str(v.from, 60)),
       notes: MD.redactDesc(str(v.notes, 200)),
       active: v.active !== false,
     };

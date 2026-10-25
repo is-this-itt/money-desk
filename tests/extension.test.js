@@ -31,7 +31,7 @@ test('read-only tools answer over stdio', async () => {
   ];
   const services = [
     { id: 's1', type: 'Subscription', name: 'Netflix', amount: 649, freq: 'Monthly', day: 5, from: 'Card', notes: 'card 4111 1111 1111 1234', active: true },
-    { id: 's2', type: 'Insurance', name: 'Term plan', amount: 12000, freq: 'Yearly', active: true },
+    { id: 's2', type: 'Insurance', name: 'Term plan', provider: 'acct 123456789012', from: 'rahul.s@oksbi', amount: 12000, freq: 'Yearly', active: true },
     { id: 's3', type: 'Subscription', name: 'Old gym', amount: 1500, freq: 'Monthly', active: false },
   ];
   fs.writeFileSync(file, JSON.stringify({ txns, rules: {}, accounts: { Card: { kind: 'card' } }, services }));
@@ -60,6 +60,8 @@ test('read-only tools answer over stdio', async () => {
   assert.deepStrictEqual(svc.services.map(v => v.name), ['Netflix', 'Term plan']);
   assert.strictEqual(svc.estimated_monthly_payments, 1649);
   assert.strictEqual(svc.services[0].notes, 'card XX1234');
+  assert.strictEqual(svc.services[1].provider, 'acct XXXXXXXX9012');
+  assert.strictEqual(svc.services[1].paid_from, 'ra***@oksbi');
   assert.strictEqual(byId[8].result.structuredContent.transactions[0].description, 'UPI/DR/XXXXXXXX5678/RAHUL/SBIN/ra***@oksbi/UPI');
   assert.strictEqual(fs.readFileSync(file, 'utf8'), before, 'data file must not change');
 });
