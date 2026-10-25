@@ -1,0 +1,5 @@
+# Personal data never goes in the repository.
+data/
+*.json.tmp
+*.mcpb
+node_modules/
