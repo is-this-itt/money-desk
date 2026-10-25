@@ -719,7 +719,7 @@
   // Tells the local helper the window is still open.
   const PAGE_ID = Math.random().toString(36).slice(2, 10);
   function ping() {
-    fetch('/__alive?id=' + PAGE_ID + '&k=' + HELPER_KEY, { cache: 'no-store' })
+    fetch('/__alive?id=' + PAGE_ID, API)
       .then(r => { if (!r.ok) throw new Error(r.status); })
       .then(() => $('#offline').classList.add('hidden'))
       .catch(() => $('#offline').classList.remove('hidden'));
@@ -727,7 +727,7 @@
   if (location.protocol.startsWith('http')) {
     ping(); setInterval(ping, 30000);
     // Closing the window lets the helper stop straight away (a reload cancels it).
-    addEventListener('pagehide', () => { try { navigator.sendBeacon('/__bye?id=' + PAGE_ID + '&k=' + HELPER_KEY, 'bye'); } catch (e) { /* idle timeout covers it */ } });
+    addEventListener('pagehide', () => { try { fetch('/__bye?id=' + PAGE_ID, { method: 'POST', headers: { 'X-Money-Desk': HELPER_KEY }, body: 'bye', keepalive: true }); } catch (e) { /* idle timeout covers it */ } });
   }
 
   // ---------- Start ----------

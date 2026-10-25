@@ -1,0 +1,16 @@
+Third-party libraries bundled with Money Desk. Check a file with:
+  certutil -hashfile <file> SHA256      (Windows)
+  sha256sum <file>                      (Linux, macOS)
+
+xlsx.full.min.js     SheetJS 0.20.3 (Apache-2.0)
+  from https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
+  SHA-256 cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41
+
+pdf.min.js           pdf.js 3.11.174 (Apache-2.0), npm pdfjs-dist@3.11.174 build/pdf.min.js
+  SHA-256 5b5799e6f8c680663207ac5b42ee14eed2a406fa7af48f50c154f0c0b1566946
+
+pdf.worker.min.js    pdf.js 3.11.174 (Apache-2.0), npm pdfjs-dist@3.11.174 build/pdf.worker.min.js
+  SHA-256 feabdf309770ed24bba31a5467836cdc8cf639c705af27d52b585b041bb8527b
+
+pdf.js 3.11.174 predates the CVE-2024-4367 fix (4.2.67). Money Desk uses the documented
+mitigation: isEvalSupported: false (app.js), and the page's CSP has no 'unsafe-eval'.

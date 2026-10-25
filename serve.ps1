@@ -68,11 +68,9 @@ function Save-DailyBackup {
     Select-Object -Skip $keepBackups | Remove-Item -Force
 }
 
-# True when the request carries this run's key: in the X-Money-Desk header, or as ?k= for the
-# keep-alive pings, which can't send headers.
+# True when the request carries this run's key in the X-Money-Desk header.
 function Test-Key($req) {
   $k = $req.Headers['X-Money-Desk']
-  if (-not $k) { $k = $req.QueryString['k'] }
   return [bool]($k -and $k -ceq $key)
 }
 
@@ -80,7 +78,7 @@ function Handle-Data($req, $res) {
   # Only the Money Desk window may use the data API. The custom header also forces browsers to
   # ask permission first for any other site, which this server never grants.
   $o = $req.Headers['Origin']
-  if (($o -and $o -ne $origin) -or -not $req.Headers['X-Money-Desk'] -or -not (Test-Key $req)) { Send-Text $res 403 'forbidden' 'text/plain'; return }
+  if (($o -and $o -ne $origin) -or -not (Test-Key $req)) { Send-Text $res 403 'forbidden' 'text/plain'; return }
   if ($req.HttpMethod -eq 'GET') {
     if (Test-Path $dataFile) { Send-Text $res 200 ([IO.File]::ReadAllText($dataFile, $utf8)) 'application/json' }
     else { Send-Text $res 404 '{}' 'application/json' }
