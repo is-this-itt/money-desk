@@ -18,4 +18,4 @@ jobs:
           node-version: 22
       - name: Parser and extension tests
         run: |
-          if [ -d tests ]; then node --test tests/; else echo "No tests yet"; fi
+          node --test tests/*.test.js

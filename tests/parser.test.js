@@ -1,0 +1,89 @@
+// Parser tests with made-up statement rows (never real data).
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert');
+const MD = require('../app/parser.js');
+
+const pick = r => r.txns.map(t => [t.date, t.merchant, t.amount, t.category]);
+
+test('SBI-style Excel rows with preamble and debit/credit columns', () => {
+  const rows = [
+    ['Account Name', ':', 'Test User'], [],
+    ['Txn Date', 'Value Date', 'Description', 'Ref No./Cheque No.', 'Debit', 'Credit', 'Balance'],
+    ['1 Oct 2026', '1 Oct 2026', 'BY TRANSFER-NEFT*ACME TECH PVT LTD*SALARY OCT', 'N1', '', '85,000.00', '1,20,000.00'],
+    ['2 Oct 2026', '2 Oct 2026', 'TO TRANSFER-UPI/DR/627512345678/SWIGGY/YESB/swiggy@ybl/Payment', 'T', '450.00', '', '1,19,550.00'],
+    ['3 Oct 2026', '3 Oct 2026', 'TO TRANSFER-UPI/DR/627598765432/RAHUL SHARMA/SBIN/rahul.s@oksbi/UPI', 'T', '2,000.00', '', '1,17,550.00'],
+    ['5 Oct 2026', '5 Oct 2026', 'TO TRANSFER-INB HDFC CREDIT CARD PAYMENT', '', '15,000.00', '', '1,02,550.00'],
+    ['7 Oct 2026', '7 Oct 2026', 'ACH DR GROWW SIP NEXTBILLION', '', '5,000.00', '', '97,550.00'],
+  ];
+  const det = MD.detectColumns(rows);
+  assert.deepStrictEqual(det.map, { balance: 6, date: 0, desc: 2, debit: 4, credit: 5 });
+  assert.deepStrictEqual(pick(MD.rowsToTxns(rows, det, { account: 'SBI', accountKind: 'bank', rules: {} })), [
+    ['2026-10-01', 'Acme Tech Pvt Ltd', 85000, 'Salary'],
+    ['2026-10-02', 'Swiggy', -450, 'Food & dining'],
+    ['2026-10-03', 'Rahul Sharma', -2000, 'People (UPI)'],
+    ['2026-10-05', 'HDFC Credit Card Payment', -15000, 'Card payments & transfers'],
+    ['2026-10-07', 'Groww SIP Nextbillion', -5000, 'Investments'],
+  ]);
+});
+
+test('Kotak-style rows with a single amount and Dr/Cr column', () => {
+  const rows = [
+    ['Sl. No.', 'Transaction Date', 'Value Date', 'Description', 'Chq / Ref No.', 'Amount', 'Dr / Cr', 'Balance', 'Dr / Cr'],
+    ['1', '04/10/2026', '04/10/2026', 'UPI/BLINKIT/427812345678/Payment', 'U', '612.50', 'DR', '10,000.00', 'CR'],
+    ['2', '06/10/2026', '06/10/2026', 'Int.Pd:1234:01-07-2026 to 30-09-2026', '', '312.00', 'CR', '10,312.00', 'CR'],
+  ];
+  const det = MD.detectColumns(rows);
+  assert.strictEqual(det.map.amount, 5);
+  assert.strictEqual(det.map.type, 6);
+  const r = MD.rowsToTxns(rows, det, { account: 'Kotak', accountKind: 'bank', rules: {} });
+  assert.deepStrictEqual(r.txns.map(t => [t.amount, t.category]), [[-612.5, 'Groceries'], [312, 'Interest & dividends']]);
+});
+
+test('Card PDF lines: Cr marker, AM/PM-like merchant names, reward points and footer text', () => {
+  const lines = [
+    '12/10/2026 13:22:01  ZOMATO LTD GURGAON  540.00',
+    '28/09/2026 13:22:01 AMAZON PAY INDIA PRIVATE BANGALORE 2,349.00',
+    '15/10/2026  BBPS PAYMENT RECEIVED 12,000.00 Cr',
+    '14/08/2026 AMAZON PAY WALLET LOAD BANGALORE 33 IN 1,658.00',
+    '30/08/2026 AMAZON PAY IN UTILITY BANGALORE IN 16 Others-100% # International Spends 830.00',
+    '18/08/2026 RAZ*Furlenco Bengaluru KA IN 13 1,325.02',
+  ];
+  assert.deepStrictEqual(pick(MD.linesToTxns(lines, { account: 'Card', accountKind: 'card', rules: {} })), [
+    ['2026-10-12', 'Zomato Ltd', -540, 'Food & dining'],
+    ['2026-09-28', 'Amazon Pay India Private', -2349, 'Shopping'],
+    ['2026-10-15', 'Bbps Payment Received', 12000, 'Card payments & transfers'],
+    ['2026-08-14', 'Amazon Pay Wallet Load', -1658, 'Shopping'],
+    ['2026-08-30', 'Amazon Pay In Utility', -830, 'Bills & utilities'],
+    ['2026-08-18', 'Furlenco', -1325.02, 'Rent & housing'],
+  ]);
+});
+
+test('Bank PDF lines use the running balance for direction', () => {
+  const lines = ['Opening Balance 50,000.00',
+    '01-10-2026 01-10-2026 UPI/DR/1234567890/ZEPTO MARKETPLACE/ICIC 845.00 49,155.00',
+    '02-10-2026 02-10-2026 NEFT CR SALARY ACME 60,000.00 1,09,155.00'];
+  assert.deepStrictEqual(MD.linesToTxns(lines, { account: 'K', accountKind: 'bank', rules: {} }).txns.map(t => t.amount), [-845, 60000]);
+});
+
+test('Sensitive values are masked, not removed, and ids ignore masking', () => {
+  assert.strictEqual(MD.redactDesc('UPI/DR/627512345678/RAHUL SHARMA/SBIN/rahul.s@oksbi/UPI'), 'UPI/DR/XXXXXXXX5678/RAHUL SHARMA/SBIN/ra***@oksbi/UPI');
+  assert.strictEqual(MD.redactDesc('POS 4386XXXXXXXX1234 SWIGGY'), 'POS XX1234 SWIGGY');
+  const a = MD.makeTxn({ date: '2026-10-03', desc: 'UPI/DR/627512345678/X Y/SBIN/xy@oksbi/UPI', amount: -1, account: 'A', accountKind: 'bank', rules: {} });
+  const b = MD.makeTxn({ date: '2026-10-03', desc: 'UPI/DR/627512345678/X Y/SBIN/xy@oksbi/UPI', amount: -1, account: 'A', accountKind: 'bank', rules: {} });
+  assert.strictEqual(a.id, b.id);
+  assert.ok(!a.desc.includes('627512345678') && !a.desc.includes('xy@oksbi'));
+});
+
+test('Saved rules win, and a __proto__ merchant cannot hijack categorisation', () => {
+  assert.strictEqual(MD.categorize('SWIGGY', 'Swiggy', -10, { swiggy: 'Groceries' }, 'card'), 'Groceries');
+  assert.strictEqual(MD.categorize('x', '__proto__', -5, {}, 'bank'), 'Other');
+});
+
+test('Dates: Indian day-first formats and Excel serials', () => {
+  assert.strictEqual(MD.parseDate('04/10/2026'), '2026-10-04');
+  assert.strictEqual(MD.parseDate('1 Oct 26'), '2026-10-01');
+  assert.strictEqual(MD.parseDate('2026-10-05'), '2026-10-05');
+  assert.strictEqual(MD.parseDate(46300), '2026-10-05');
+  assert.strictEqual(MD.parseDate('31/02/2026'), null);
+});

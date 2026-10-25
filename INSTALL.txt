@@ -1,0 +1,17 @@
+Money Desk: a private dashboard for your bank and card statements
+
+First time
+1. Double-click "Add to Desktop and Start menu.vbs".
+2. Open Money Desk from the Desktop or Start menu. It opens in its own
+   window with no console. Right-click it in the Start menu to pin it to
+   the taskbar.
+
+Close the window when you're done. The background helper stops with it.
+
+Privacy
+- Runs only on this laptop. The page is locked so it cannot send data
+  anywhere, and nothing is uploaded.
+- Your data is saved in data\money-desk.json in this folder, with a daily
+  copy in data\backups (last 30 days). Don't delete the data folder.
+  Use Accounts & data > Download backup to keep a copy elsewhere too.
+- Statement passwords are used only to open the file and are never saved.
