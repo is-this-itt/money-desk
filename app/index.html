@@ -184,6 +184,10 @@ select { cursor: pointer; }
 .seg button { border: 0; background: var(--surface); padding: 0 14px; cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
 .map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.svc-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.svc-form label { font-size: 12.5px; color: var(--text-2); font-weight: 550; display: flex; flex-direction: column; gap: 5px; }
+.svc-form label.wide { grid-column: 1 / -1; }
+.svc-form input, .svc-form select { height: 38px; border: 1px solid var(--line); border-radius: 9px; padding: 0 10px; background: var(--surface); font-weight: 400; color: var(--text); }
 .map-grid label { font-size: 12px; color: var(--text-2); display: flex; flex-direction: column; gap: 4px; }
 .map-grid select { height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 0 8px; }
 .note { padding: 12px 14px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); font-size: 13px; }
@@ -222,6 +226,7 @@ select { cursor: pointer; }
     <div class="brand"><span class="brand-mark"><svg width="18" height="18" viewBox="0 0 32 32"><path d="M5 25V7h4l7 10 7-10h4v18h-4V14l-7 10-7-10v11z" fill="#fff"/></svg></span>Money Desk</div>
     <button class="nav-btn" data-view="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Overview</button>
     <button class="nav-btn" data-view="transactions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Transactions</button>
+    <button class="nav-btn" data-view="services"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg>My services</button>
     <button class="nav-btn" data-view="import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Import statements</button>
     <button class="nav-btn" data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Accounts &amp; data</button>
     <div class="side-foot"><span class="dot-ok"></span><b>Private and offline</b><br>Your data is saved in a file on this laptop. Nothing is uploaded.</div>
