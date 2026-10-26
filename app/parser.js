@@ -6,11 +6,15 @@
 
   // ---------- Categories ----------
   // kind: spend (counts as spending), income, invest, transfer (ignored in totals)
+  // Some words are cut on purpose to match SBI's cut-up lines, and still match the full text:
+  // 'mutual fun', 'indian clearin' (ICCL, which collects SIPs), 'interes t credit', 'jewell'.
+  // 'rzpx pvt ltd pa' is how SBI prints RazorpayX Payroll, which pays salaries for many
+  // employers; anything else paid through it can be fixed with a rule.
   const CATEGORIES = [
     { name: 'Groceries', kind: 'spend', words: ['bigbasket', 'big basket', 'blinkit', 'grofers', 'zepto', 'dmart', 'd mart', 'avenue supermarts', 'instamart', 'jiomart', 'reliance fresh', 'reliance smart', 'more retail', 'natures basket', 'ratnadeep', 'spencer', 'dunzo', 'supermarket', 'kirana', 'grocery'] },
     { name: 'Food & dining', kind: 'spend', words: ['swiggy', 'zomato', 'eatsure', 'domino', 'mcdonald', 'kfc', 'pizza', 'starbucks', 'cafe', 'coffee', 'restaurant', 'burger', 'haldiram', 'chaayos', 'blue tokai', 'subway', 'barbeque', 'biryani', 'bakery', 'dhaba', 'food'] },
     { name: 'Bills & utilities', kind: 'spend', words: ['electricity', 'bescom', 'msedcl', 'mahavitaran', 'tata power', 'adani elec', 'torrent power', 'tneb', 'airtel', 'jio', 'vodafone', 'vodaidea', 'bsnl', 'act fibernet', 'broadband', 'hathway', 'gas', 'water bill', 'recharge', 'dth', 'tata play', 'bill payment', 'bbps', 'utility', 'utilities'] },
-    { name: 'Shopping', kind: 'spend', words: ['amazon', 'amzn', 'flipkart', 'myntra', 'ajio', 'meesho', 'nykaa', 'tata cliq', 'croma', 'reliance digital', 'decathlon', 'ikea', 'lenskart', 'jewel', 'firstcry', 'snapdeal', 'pantaloons', 'westside', 'zudio', 'h&m', 'uniqlo', 'lifestyle', 'shoppers stop'] },
+    { name: 'Shopping', kind: 'spend', words: ['amazon', 'amzn', 'flipkart', 'myntra', 'ajio', 'meesho', 'nykaa', 'tata cliq', 'croma', 'reliance digital', 'decathlon', 'ikea', 'lenskart', 'jewell', 'firstcry', 'snapdeal', 'pantaloons', 'westside', 'zudio', 'h&m', 'uniqlo', 'lifestyle', 'shoppers stop'] },
     { name: 'Transport', kind: 'spend', words: ['uber', 'ola ', 'olacabs', 'ani technologies', 'rapido', 'metro', 'fastag', 'parking', 'namma yatri', 'blusmart', 'toll'] },
     { name: 'Travel', kind: 'spend', words: ['irctc', 'redbus', 'indigo', 'interglobe', 'air india', 'vistara', 'akasa', 'spicejet', 'makemytrip', 'make my trip', 'goibibo', 'cleartrip', 'yatra', 'ixigo', 'booking.com', 'airbnb', 'oyo', 'agoda', 'hotel'] },
     { name: 'Fuel', kind: 'spend', words: ['petrol', 'fuel', 'hpcl', 'bpcl', 'indian oil', 'iocl', 'shell', 'filling station', 'service station'] },
@@ -162,18 +166,19 @@
 
   // SBI statements cut descriptions into fixed-width pieces joined by spaces, so words get split
   // ("k otak811pa", "C OGNAIZE"). Read the payee from the fields SBI always puts in the same place.
-  // Returns { name, handle } (handle: the UPI ID's first part, spaces removed) or null.
+  // Returns { name, handle, upi } (handle: the UPI ID's first part, spaces removed) or null.
   function sbiParts(desc) {
-    const d = clean(desc);
+    // Real lines are under 200 characters; the cap keeps the patterns below fast on odd input.
+    const d = clean(desc).slice(0, 300);
     let m = /^(?:WDL|DEP) TFR UPI\/(?:DR|CR)\/[^/]*\/([^/]*)\/[^/]*\/([^/]*)/i.exec(d);
-    if (m) return { name: m[1].trim(), handle: m[2].replace(/\s+/g, '').toLowerCase() };
-    m = /^DEP TFR (?:NEFT|IMPS|RTGS)\*[^*]*\*[^*]*\*(.*?)(?:\s+X*\d{4,})?(?:\s+AT\s+\d+\b.*)?$/i.exec(d);
+    if (m) return { name: m[1].trim(), handle: m[2].replace(/\s+/g, '').toLowerCase(), upi: true };
+    m = /^DEP TFR (?:NEFT|IMPS|RTGS)\*[^*]*\*[^*]*\*(.*?)(?:\s+(?:X{4,}\d{4}|\d{8,}))?(?:\s+AT\s+\d+\b.*)?$/i.exec(d);
     // The payer's name starts right after a cut, so its first letter stands alone ("A XIS MUTUAL").
-    if (m) return { name: m[1].replace(/^([a-z]) (?=[a-z]{2})/i, '$1').trim(), handle: '' };
-    m = /^(?:WDL|DEP) TFR (?:INB|CMP|SBIY\S*)\s+(.*?)(?:\s+X*\d{4,})?\s+AT\s+\d+\b/i.exec(d);
-    if (m) { const of = m[1].split(/\s+OF\s+/i); return { name: of[of.length - 1].trim(), handle: '' }; }
+    if (m) return { name: m[1].replace(/^([a-z]) (?=[a-z]{2})/i, '$1').trim(), handle: '', upi: false };
+    m = /^(?:WDL|DEP) TFR (?:INB|CMP|SBIY\S*)\s+(.*?)(?:\s+(?:X{4,}\d{4}|\d{8,}))?\s+AT\s+\d+\b/i.exec(d);
+    if (m) { const of = m[1].split(/\s+OF\s+/i); return { name: of[of.length - 1].trim(), handle: '', upi: false }; }
     m = /^DEBIT ACHDr \S+ \S+ (.+)$/i.exec(d);
-    if (m) return { name: m[1].trim(), handle: '' };
+    if (m) return { name: m[1].trim(), handle: '', upi: false };
     return null;
   }
 
@@ -182,10 +187,10 @@
     const low = d.toLowerCase();
     const sbi = sbiParts(d);
     if (sbi) {
-      const upi = /^(?:WDL|DEP) TFR UPI/i.test(d), w = sbi.name.slice(0, 40);
+      const w = sbi.name;
       // A UPI payee can be named by a phone number, which the statement masks.
-      if (/[a-z]{2,}/i.test(w) && !/x{4,}/i.test(w)) return { name: titleCase(w), person: upi && !/[0-9]/.test(w) && w.split(' ').length <= 4 && !looksBusiness(w) };
-      if (upi) return { name: 'UPI payment', person: true };
+      if (/[a-z]{2,}/i.test(w) && !/x{4,}/i.test(w)) return { name: titleCase(w.slice(0, 40)), person: sbi.upi && !/[0-9]/.test(w) && w.split(' ').length <= 4 && !looksBusiness(w) };
+      if (sbi.upi) return { name: 'UPI payment', person: true };
     }
     if (/(^|[\s/:-])upi([\s/:-]|$)/i.test(d) || /@[a-z]{2,}/i.test(d) || /\b(neft|imps|rtgs)\b/i.test(d)) {
       const tokens = d.split(/[\/:|*]|\s-\s|-(?=\S)/).map(t => t.trim()).filter(Boolean);
@@ -578,7 +583,7 @@
   const serviceKey = v => [v.type, merchantKey(v.name), merchantKey(v.provider || ''), v.last4, v.amount == null || v.amount === '' ? '' : Number(v.amount), v.day || ''].join('|');
 
   const PARSER_VERSION = 5;
-  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
+  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);

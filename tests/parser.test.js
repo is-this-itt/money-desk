@@ -249,6 +249,17 @@ test('SBI 2026 descriptions: words cut by the statement still give the payee and
   assert.deepStrictEqual(cat('WDL TFR SBIY1234567890123456789/P/Bill Payment 0 12349104 OF TEST JEWELLERS AT 01234 TESTPUR', -40000), ['Test Jewellers', 'Shopping']);
   assert.deepStrictEqual(cat('WDL TFR INB TEST LIFE INSURANCE CO MPAN 12345672090 AT 01234 TESTPUR', -10000), ['Test Life Insurance Co Mpan', 'Insurance']);
   assert.deepStrictEqual(cat('INTERES T CREDIT', 65), ['Interes T Credit', 'Interest & dividends']);
+  assert.deepStrictEqual(cat('DEP TFR UPI/CR/612345678906/PRIYA KU/KKBK/p riyak.ok/UPI' + tail, 1500), ['Priya Ku', 'Other income']);
+  assert.deepStrictEqual(cat('DEP TFR IMPS*HDFC0001234*612345678907*T EST TRADERS 2020', 4000), ['Test Traders 2020', 'Other income']);
+  assert.deepStrictEqual(cat('DEP TFR NEFT*KKBK0001234*KKBKH2601234567*T EST PAYER', 4000), ['Test Payer', 'Other income']);
+  assert.deepStrictEqual(cat('WDL TFR UPI/DR/612345678908/SAFE GOLD/YESB/ sa***@y/UPI' + tail, -1000), ['Safe Gold', 'Investments']);
+  assert.deepStrictEqual(cat('WDL TFR UPI/DR/612345678909/THYROCAR/YESB/t hyrocare3/UPI' + tail, -900), ['Thyrocar', 'Health & fitness']);
+  // A long name is checked in full, not after it is shortened for display.
+  const long = MD.extractMerchant('WDL TFR UPI/DR/612345678910/ANNAPURNA SRINIVASA RAGHAVENDRA TRADERS/YESB/q 1234/UPI' + tail);
+  assert.strictEqual(long.person, false);
+  // Lines from other banks are not read as SBI lines.
+  assert.strictEqual(MD.sbiParts('TO TRANSFER-UPI/DR/627512345678/SWIGGY/YESB/swiggy@ybl/Payment'), null);
+  assert.strictEqual(MD.sbiParts('UPI-RAHUL SHARMA-rahul@okhdfcbank-HDFC0001234-612345678901-UPI'), null);
   // The same rows as saved (masked) read the same way, so saved data can be re-labelled.
   const masked = MD.redactDesc('WDL TFR UPI/DR/612345678901/Blinkit/HDFC/bl inkit.rz/Payvi' + tail);
   assert.deepStrictEqual(cat(masked, -250), ['Blinkit', 'Groceries']);
