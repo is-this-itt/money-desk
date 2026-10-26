@@ -269,3 +269,21 @@ test('SBI 2026 descriptions: words cut by the statement still give the payee and
   const masked = MD.redactDesc('WDL TFR UPI/DR/612345678901/Blinkit/HDFC/bl inkit.rz/Payvi' + tail);
   assert.deepStrictEqual(cat(masked, -250), ['Blinkit', 'Groceries']);
 });
+
+test('Kotak lines: card, ATM, NACH and interest payees; merchant names never keep long numbers', () => {
+  const cat = (desc, amount) => { const m = MD.extractMerchant(desc); let c = MD.categorize(desc, m.name, amount, {}, 'bank'); if (c === 'Other' && m.person) c = 'People (UPI)'; return [m.name, c]; };
+  assert.deepStrictEqual(cat('PCD/1234/BHARTI AIRTEL LIMITED/NOIDA090126/18:13', -859), ['Bharti Airtel Limited', 'Bills & utilities']);
+  assert.deepStrictEqual(cat('ATL/1234/601530/+TESTPUR MAIN ROAD N060526/19:32', -4000), ['ATM withdrawal', 'Cash withdrawal']);
+  assert.deepStrictEqual(cat('NACH-10-DR-TEST AUTO CREDIT LI-B2WBAN0012345', -2200), ['Test Auto Credit Li', 'EMI & loans']);
+  assert.deepStrictEqual(cat('Int.Pd:0123456789:01-07-2026 to 30-09-2026', 106), ['Interest', 'Interest & dividends']);
+  assert.deepStrictEqual(cat('811 SUPER PROGRAM FEE', -499), ['Super Program Fee', 'Fees & interest']);
+  assert.deepStrictEqual(cat('Ac xfr from gl 12048 to 12042', -100), ['Ac Xfr From Gl To', 'Card payments & transfers']);
+  assert.deepStrictEqual(cat('KOTAK811/626912345678', 5000), ['Kotak811', 'Other income']);
+  assert.deepStrictEqual(cat('UPI/testname1398/601512345678/UPI', -100), ['Testname', 'People (UPI)']);
+  assert.deepStrictEqual(cat('UPI/9876543210@ybl/601012345678/UPI', -100), ['UPI payment', 'People (UPI)']);
+  assert.deepStrictEqual(cat(MD.redactDesc('UPI/9876543210@ybl/601012345678/UPI'), -100), ['UPI payment', 'People (UPI)']);
+  assert.strictEqual(MD.extractMerchant('SWEEP TRANSFER TO [1234567890]').name, 'Sweep Transfer To');
+  assert.strictEqual(MD.extractMerchant(MD.redactDesc('SWEEP TRANSFER TO [1234567890]')).name, 'Sweep Transfer To');
+  for (const d of ['KOTAK811/626912345678', 'UPI/9876543210@ybl/601012345678/UPI', 'NACH-10-DR-TEST AUTO CREDIT LI-B2WBAN0012345', 'Int.Pd:0123456789:01-07-2026'])
+    assert.ok(!/\d{5,}/.test(MD.extractMerchant(d).name), d);
+});
