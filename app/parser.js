@@ -25,10 +25,10 @@
     { name: 'Education', kind: 'spend', words: ['udemy', 'coursera', 'school', 'college', 'university', 'tuition', 'byju', 'unacademy', 'upgrad', 'exam fee'] },
     { name: 'Insurance', kind: 'spend', words: ['insurance', 'lic of india', ' lic ', 'policybazaar', 'acko', 'ergo', 'lombard', 'star health', 'go digit', 'max life', 'tata aia', 'hdfc life', 'icici pru', 'premium'] },
     { name: 'EMI & loans', kind: 'spend', words: [' emi', 'emi ', 'loan', 'bajaj finance', 'bajaj fin', 'home credit', 'nach-', 'lazypay', 'simpl', 'slice'] },
-    { name: 'Cash withdrawal', kind: 'spend', words: ['atm', 'cash wdl', 'cash withdrawal', 'nwd', 'atw', 'cwdr'] },
-    { name: 'Fees & interest', kind: 'spend', words: ['annual fee', 'late fee', 'late payment', 'finance charge', 'interest charged', 'interest on', 'overlimit', 'charges', 'sms alert', 'membership fee', 'joining fee', 'renewal fee', 'gst', 'igst', 'cgst', 'sgst', 'penalty', 'surcharge', 'markup'] },
+    { name: 'Cash withdrawal', kind: 'spend', words: ['atm', 'cash wdl', 'cash withdrawal', ' atl/', 'nwd', 'atw', 'cwdr'] },
+    { name: 'Fees & interest', kind: 'spend', words: ['annual fee', 'late fee', 'late payment', 'finance charge', 'interest charged', 'interest on', 'overlimit', 'charges', 'sms alert', 'membership fee', 'program fee', 'joining fee', 'renewal fee', 'gst', 'igst', 'cgst', 'sgst', 'penalty', 'surcharge', 'markup'] },
     { name: 'Investments', kind: 'invest', words: ['groww', 'nextbillion', 'zerodha', 'upstox', 'wealthy', 'kuvera', 'mutual fun', 'mutualfund', ' mf ', 'sip ', 'bse ltd', 'bsestarmf', 'nse clearing', 'indian clearin', 'iccl', 'cams', 'kfin', 'ppf', 'nps', 'smallcase', 'angel one', 'angel broking', 'dhan', 'paytm money', 'icici direct', 'hdfc securities', 'fixed deposit', ' fd ', 'recurring deposit', 'sgb', 'safegold', 'safe gold'] },
-    { name: 'Card payments & transfers', kind: 'transfer', words: ['credit card payment', 'cc payment', 'card payment', 'payment received', 'payment - thank', 'thank you', 'cred club', 'dreamplug', 'cred ', 'autopay', 'self transfer', ' self ', 'own account', 'sweep', 'cardbill', 'card bill', 'billdesk', 'sbicardp'] },
+    { name: 'Card payments & transfers', kind: 'transfer', words: ['credit card payment', 'cc payment', 'card payment', 'payment received', 'payment - thank', 'thank you', 'cred club', 'dreamplug', 'cred ', 'autopay', 'self transfer', ' self ', 'own account', 'ac xfr from gl', 'sweep', 'cardbill', 'card bill', 'billdesk', 'sbicardp'] },
     { name: 'Salary', kind: 'income', words: ['salary', 'sal ', 'payroll', 'sal-', 'sal/', 'rzpx pvt ltd pa'] },
     { name: 'Interest & dividends', kind: 'income', words: ['interest credit', 'interes t credit', 'int.pd', 'int pd', 'int.coll', 'interest paid', 'sb interest', 'dividend', 'div '] },
     { name: 'Refunds & cashback', kind: 'spend', words: ['refund', 'reversal', 'cashback', 'cash back', 'rev-', 'chargeback'] },
@@ -183,9 +183,31 @@
     return null;
   }
 
+  // Kotak lines that name the payee in a fixed place: card spends, ATM withdrawals,
+  // NACH debits and interest. Returns a merchant or null.
+  function kotakMerchant(d) {
+    let m = /^PCD\/\d+\/([^/]+)/i.exec(d);
+    if (m) return { name: titleCase(m[1].trim().slice(0, 40)), person: false };
+    if (/^ATL\//i.test(d)) return { name: 'ATM withdrawal', person: false };
+    m = /^NACH-\d+-DR-(.+?)-[A-Z0-9]*$/i.exec(d);
+    if (m) return { name: titleCase(m[1].trim().slice(0, 40)), person: false };
+    if (/^Int\.Pd:/i.test(d)) return { name: 'Interest', person: false };
+    return null;
+  }
+
+  // Merchant names are labels shown everywhere (and to Claude through the extension), so they
+  // never keep account, card, phone or reference numbers; the masked line stays in desc.
   function extractMerchant(desc) {
+    const m = readMerchant(desc);
+    const name = m.name.replace(/\d{5,}/g, ' ').replace(/[\[(]\s*[\])]/g, ' ').replace(/[\s/:.-]+$/, '').replace(/^[\s/:.-]+/, '').replace(/\s+/g, ' ').trim();
+    return { name: name || 'Unknown', person: m.person };
+  }
+
+  function readMerchant(desc) {
     const d = clean(desc);
     const low = d.toLowerCase();
+    const kotak = kotakMerchant(d);
+    if (kotak) return kotak;
     const sbi = sbiParts(d);
     if (sbi) {
       const w = sbi.name;
@@ -205,7 +227,13 @@
         if (!/[a-z]{3,}/i.test(w)) continue;
         return { name: titleCase(w.slice(0, 40)), person: !/[0-9]/.test(w) && w.split(' ').length <= 4 && !looksBusiness(w) };
       }
-      if (vpa) return { name: titleCase(vpa.replace(/[._]/g, ' ').replace(/\d+/g, '').trim() || vpa), person: true };
+      // A UPI ID written without its @handle ("UPI/aravind1398/..."): keep its letters.
+      const handle = tokens.map(t => t.replace(/\d+/g, '').trim()).find(w => w.length >= 3 && /^[a-z][a-z ._]*$/i.test(w) && !/^x+$/i.test(w) && !BANK_CODES.test(w) && !/^upi$/i.test(w));
+      if (vpa) {
+        const v = vpa.replace(/[._]/g, ' ').replace(/\d+/g, '').trim();
+        return { name: v.length >= 2 ? titleCase(v) : 'UPI payment', person: true };
+      }
+      if (/^upi\//i.test(d)) return handle ? { name: titleCase(handle.replace(/[._]/g, ' ')), person: true } : { name: 'UPI payment', person: true };
     }
     let name = stripPrefix(d)
       .replace(/\b(xx+|\*+)\d*\b/gi, ' ')
@@ -584,7 +612,7 @@
   // Two entries are the same service when type, name, provider, last 4 digits, amount and day all match.
   const serviceKey = v => [v.type, merchantKey(v.name), merchantKey(v.provider || ''), v.last4, v.amount == null || v.amount === '' ? '' : Number(v.amount), v.day || ''].join('|');
 
-  const PARSER_VERSION = 5;
+  const PARSER_VERSION = 6;
   const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
