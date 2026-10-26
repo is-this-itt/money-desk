@@ -29,7 +29,12 @@ test('read-only tools answer over stdio', async () => {
     { date: '2026-08-17', amount: -50, desc: 'UPI/DR/627512345678/RAHUL/SBIN/rahul.s@oksbi/UPI', merchant: 'Rahul', account: 'Card', category: 'People (UPI)', id: 'a4' },
     { date: 'bad', amount: 'x' }, null, { date: '2026-08-18', amount: -1, desc: null, merchant: 7, account: 'Card', category: 'Other', id: 'a5' },
   ];
-  fs.writeFileSync(file, JSON.stringify({ txns, rules: {}, accounts: { Card: { kind: 'card' } } }));
+  const services = [
+    { id: 's1', type: 'Subscription', name: 'Netflix', amount: 649, freq: 'Monthly', day: 5, from: 'Card', notes: 'card 4111 1111 1111 1234', active: true },
+    { id: 's2', type: 'Insurance', name: 'Term plan', provider: 'acct 123456789012', from: 'rahul.s@oksbi', amount: 12000, freq: 'Yearly', active: true },
+    { id: 's3', type: 'Subscription', name: 'Old gym', amount: 1500, freq: 'Monthly', active: false },
+  ];
+  fs.writeFileSync(file, JSON.stringify({ txns, rules: {}, accounts: { Card: { kind: 'card' } }, services }));
   const before = fs.readFileSync(file, 'utf8');
   const res = await call(file, [
     { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } },
@@ -42,6 +47,7 @@ test('read-only tools answer over stdio', async () => {
     { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'list_transactions', arguments: { search: '6275' } } },
     { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'list_transactions', arguments: { search: 'rahul.s@' } } },
     { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'list_transactions', arguments: { search: '5678' } } },
+    { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'list_services', arguments: {} } },
   ]);
   const byId = Object.fromEntries(res.map(r => [r.id, r]));
   assert.ok(byId[2].result.tools.every(t => t.annotations.readOnlyHint));
@@ -50,6 +56,12 @@ test('read-only tools answer over stdio', async () => {
   assert.strictEqual(byId[5].result.isError, true);
   assert.strictEqual(byId[6].result.structuredContent.total_matching, 0);
   assert.strictEqual(byId[7].result.structuredContent.total_matching, 0);
+  const svc = byId[9].result.structuredContent;
+  assert.deepStrictEqual(svc.services.map(v => v.name), ['Netflix', 'Term plan']);
+  assert.strictEqual(svc.estimated_monthly_payments, 1649);
+  assert.strictEqual(svc.services[0].notes, 'card XX1234');
+  assert.strictEqual(svc.services[1].provider, 'acct XXXXXXXX9012');
+  assert.strictEqual(svc.services[1].paid_from, 'ra***@oksbi');
   assert.strictEqual(byId[8].result.structuredContent.transactions[0].description, 'UPI/DR/XXXXXXXX5678/RAHUL/SBIN/ra***@oksbi/UPI');
   assert.strictEqual(fs.readFileSync(file, 'utf8'), before, 'data file must not change');
 });

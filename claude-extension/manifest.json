@@ -3,7 +3,7 @@
   "manifest_version": "0.3",
   "name": "money-desk",
   "display_name": "Money Desk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Read-only access to your Money Desk spending data, stored on this computer.",
   "long_description": "Lets Claude answer questions about your spending, income, investments, subscriptions and recurring payments using the transactions you imported into Money Desk. It reads the Money Desk data file on this computer and never changes it. It makes no network connections. UPI IDs and reference numbers are not included.",
   "author": { "name": "Rushi" },
@@ -22,7 +22,8 @@
     { "name": "list_transactions", "description": "Individual transactions with filters for dates, account, category, text and amount" },
     { "name": "spending_breakdown", "description": "Spending grouped by category, merchant, account or month" },
     { "name": "find_recurring_payments", "description": "Rent, SIPs, bills and subscriptions that repeat each month" },
-    { "name": "get_accounts_and_categories", "description": "Imported accounts and date coverage, categories and saved rules" }
+    { "name": "get_accounts_and_categories", "description": "Imported accounts and date coverage, categories and saved rules" },
+    { "name": "list_services", "description": "Your own list of accounts, cards, subscriptions, mandates, SIPs, insurance and loans" }
   ],
   "user_config": {
     "data_file": {
