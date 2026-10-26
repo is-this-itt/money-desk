@@ -12,10 +12,12 @@ $backupDir = Join-Path $dataDir 'backups'
 $keyFile = Join-Path $dataDir 'session.key'
 $maxBody = 64MB
 $keepBackups = 30
+$keepOpenBackups = 20
+$openBackupDone = $false
 $port = 8789
 $prefix = "http://localhost:$port/"
 $origin = "http://localhost:$port"
-$version = '8'
+$version = '9'
 # Safety net if the window never says goodbye (for example, the browser crashed).
 $idleLimit = [TimeSpan]::FromMinutes(10)
 $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -231,14 +233,22 @@ function Send-Text($res, [int]$status, [string]$text, [string]$type) {
   $res.OutputStream.Write($bytes, 0, $bytes.Length)
 }
 
-# Keeps one copy per day of the data file before it is first changed that day.
-function Save-DailyBackup {
+# Keeps a copy of the data file from before its first change each day (last 30 days), and
+# one from before the first change each time Money Desk is opened (last 20 opens), so a
+# change made right after an update can be undone the same day.
+function Save-Backups {
   if (-not (Test-Path $dataFile)) { return }
   if (-not (Test-Path $backupDir)) { New-Item -ItemType Directory -Path $backupDir | Out-Null }
   $daily = Join-Path $backupDir ("money-desk-{0}.json" -f (Get-Date -Format 'yyyy-MM-dd'))
   if (-not (Test-Path $daily)) { Copy-Item $dataFile $daily }
   Get-ChildItem $backupDir -Filter 'money-desk-*.json' | Sort-Object Name -Descending |
     Select-Object -Skip $keepBackups | Remove-Item -Force
+  if (-not $script:openBackupDone) {
+    Copy-Item $dataFile (Join-Path $backupDir ("opened-{0}.json" -f (Get-Date -Format 'yyyy-MM-dd-HHmmss')))
+    $script:openBackupDone = $true
+    Get-ChildItem $backupDir -Filter 'opened-*.json' | Sort-Object Name -Descending |
+      Select-Object -Skip $keepOpenBackups | Remove-Item -Force
+  }
 }
 
 # True when the request carries this run's key in the X-Money-Desk header.
@@ -264,7 +274,7 @@ function Handle-Data($req, $res) {
     $reader.Close()
     if (-not $body.StartsWith('{') -or -not $body.Contains('"txns"')) { Send-Text $res 400 'bad data' 'text/plain'; return }
     if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
-    Save-DailyBackup
+    Save-Backups
     # Write to a temp file first so a crash never leaves a half-written data file.
     $tmp = "$dataFile.tmp"
     [IO.File]::WriteAllText($tmp, $body, $utf8)
