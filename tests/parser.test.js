@@ -378,4 +378,8 @@ test('SBI UPI reversals are refunds', () => {
   assert.strictEqual(t.merchant, 'UPI Reversal');
   assert.strictEqual(t.category, 'Refunds & cashback');
   assert.ok(!/612345678901/.test(t.desc));
+  // "SAL" counts only as a word of its own.
+  assert.strictEqual(MD.categorize('NEFT/SAL/ACME', 'Acme', 50000, {}, 'bank'), 'Salary');
+  assert.strictEqual(MD.categorize('NEFT-SAL-OCT', 'Acme', 50000, {}, 'bank'), 'Salary');
+  assert.strictEqual(MD.categorize('UPI/CR/Universal Traders', 'Universal Traders', 500, {}, 'bank'), 'Other income');
 });

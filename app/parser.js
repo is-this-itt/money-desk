@@ -29,7 +29,9 @@
     { name: 'Fees & interest', kind: 'spend', words: ['annual fee', 'late fee', 'late payment', 'finance charge', 'interest charged', 'interest on', 'overlimit', 'charges', 'sms alert', 'membership fee', 'program fee', 'joining fee', 'renewal fee', 'gst', 'igst', 'cgst', 'sgst', 'penalty', 'surcharge', 'markup'] },
     { name: 'Investments', kind: 'invest', words: ['groww', 'nextbillion', 'zerodha', 'upstox', 'wealthy', 'kuvera', 'mutual fun', 'mutualfund', ' mf ', 'sip ', 'bse ltd', 'bsestarmf', 'nse clearing', 'indian clearin', 'iccl', 'cams', 'kfin', 'ppf', 'nps', 'smallcase', 'angel one', 'angel broking', 'dhan', 'paytm money', 'icici direct', 'hdfc securities', 'fixed deposit', ' fd ', 'recurring deposit', 'sgb', 'safegold', 'safe gold'] },
     { name: 'Card payments & transfers', kind: 'transfer', words: ['credit card payment', 'cc payment', 'card payment', 'payment received', 'payment - thank', 'thank you', 'cred club', 'dreamplug', 'cred ', 'autopay', 'self transfer', ' self ', 'own account', 'ac xfr from gl', 'sweep', 'cardbill', 'card bill', 'billdesk', 'sbicardp'] },
-    { name: 'Salary', kind: 'income', words: ['salary', 'sal ', 'payroll', 'sal-', 'sal/', 'rzpx pvt ltd pa'] },
+    { name: 'Salary', kind: 'income', words: ['salary', 'payroll', 'rzpx pvt ltd pa',
+      // "SAL" only as a word of its own, so names ending in "sal" ("Reversal") don't match.
+      ...[' ', '/', '-', '*'].flatMap(a => [' ', '/', '-'].map(b => a + 'sal' + b))] },
     { name: 'Interest & dividends', kind: 'income', words: ['interest credit', 'interes t credit', 'int.pd', 'int pd', 'int.coll', 'interest paid', 'sb interest', 'dividend', 'div '] },
     { name: 'Refunds & cashback', kind: 'spend', words: ['refund', 'reversal', 'cashback', 'cash back', 'rev-', 'upi/rev/', 'chargeback'] },
     { name: 'People (UPI)', kind: 'spend', words: [] },
