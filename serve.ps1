@@ -55,13 +55,14 @@ function Open-Window([string]$key) {
 # The window belongs to Edge, so Windows would show (and pin) it as Edge. Once it appears, give it
 # Money Desk's own taskbar identity: its icon, its name, and Money Desk.vbs as what a pin starts.
 $badgeScript = {
-  param([string]$dir, [bool]$stamp)
-  # Nothing here is needed for Money Desk to work, so a failure only leaves a line in this log
-  # (and the window keeps the Edge icon).
+  param([string]$dir)
+  # Nothing here is needed for Money Desk to work, so a failure only leaves a note in this log,
+  # which each run replaces (and the window keeps the Edge icon).
   $ErrorActionPreference = 'Stop'
   $log = Join-Path $dir 'data\taskbar-icon.log'
-  trap { try { Add-Content -LiteralPath $log -Value ('{0:s} {1}' -f (Get-Date), $_) } catch { }; return }
-  Add-Type -TypeDefinition @'
+  $id = 'MoneyDesk.App'
+  try {
+  if (-not ('MoneyDeskWindow' -as [type])) { Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -86,7 +87,7 @@ public static class MoneyDeskWindow {
   }
   [StructLayout(LayoutKind.Sequential, Pack = 4)]
   struct PropertyKey { public Guid fmtid; public uint pid; }
-  // 24 bytes: the size on 64-bit Windows (32-bit uses 16 and ignores the rest).
+  // 24 bytes: PROPVARIANT's size in 64-bit processes.
   [StructLayout(LayoutKind.Explicit, Size = 24)]
   struct PropVariant { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr str; }
 
@@ -155,37 +156,41 @@ public static class MoneyDeskWindow {
     finally { Marshal.ReleaseComObject(store); }
   }
 }
-'@
+'@ }
   $vbs = Join-Path $dir 'Money Desk.vbs'
   $command = '"' + (Join-Path $env:WINDIR 'System32\wscript.exe') + '" "' + $vbs + '"'
   $icon = (Join-Path $dir 'money-desk.ico') + ',0'
-  # Wait up to 30 seconds for the window to open and show its title.
+  # Wait up to 30 seconds (60 checks, half a second apart) for the window to open and show its
+  # title. A second launch waits here too, so it can badge the new window it just opened.
   $badged = $false
   for ($i = 0; $i -lt 60 -and -not $badged; $i++) {
-    $h = [MoneyDeskWindow]::Find('MoneyDesk.App')
-    if ($h -ne [IntPtr]::Zero) { $badged = [MoneyDeskWindow]::Badge($h, 'MoneyDesk.App', $command, $icon, 'Money Desk') }
+    $h = [MoneyDeskWindow]::Find($id)
+    if ($h -ne [IntPtr]::Zero) { $badged = [MoneyDeskWindow]::Badge($h, $id, $command, $icon, 'Money Desk') }
     else { Start-Sleep -Milliseconds 500 }
   }
-  if (-not $badged) { Add-Content -LiteralPath $log -Value ('{0:s} the Money Desk window was not found or could not be badged' -f (Get-Date)) }
-  # Money Desk shortcuts on the Desktop, in the Start menu and pinned to the taskbar
-  # (once per helper start; a second window needs only its own badge, and shortcuts made
-  # while the helper runs are stamped at its next start).
-  if (-not $stamp) { return }
+  $note = if ($badged) { $null } else { 'the Money Desk window was not found or could not be badged' }
+  # Money Desk shortcuts on the Desktop, in the Start menu and pinned to the taskbar, including
+  # ones made since the last start.
   $sh = New-Object -ComObject WScript.Shell
   $places = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'),
     (Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'))
   foreach ($p in $places) {
     Get-ChildItem -LiteralPath $p -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-Object {
       $lnkArgs = try { $sh.CreateShortcut($_.FullName).Arguments } catch { '' }
-      if ($lnkArgs -and $lnkArgs.IndexOf($vbs, [StringComparison]::OrdinalIgnoreCase) -ge 0) { [void][MoneyDeskWindow]::StampShortcut($_.FullName, 'MoneyDesk.App') }
+      if ($lnkArgs -and $lnkArgs.IndexOf($vbs, [StringComparison]::OrdinalIgnoreCase) -ge 0) { [void][MoneyDeskWindow]::StampShortcut($_.FullName, $id) }
     }
   }
+  } catch { $note = "$_" }
+  try {
+    if ($note) { Set-Content -LiteralPath $log -Value ('{0:s} {1}' -f (Get-Date), $note) }
+    elseif (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log }
+  } catch { }
 }
 
 # Runs the step above beside the helper, so the helper can serve the page while it waits.
 function Start-WindowBadge([switch]$Wait) {
   try {
-    $ps = [PowerShell]::Create().AddScript($badgeScript).AddArgument($PSScriptRoot).AddArgument(-not $Wait)
+    $ps = [PowerShell]::Create().AddScript($badgeScript).AddArgument($PSScriptRoot)
     if ($Wait) { [void]$ps.Invoke(); $ps.Dispose() } else { [void]$ps.BeginInvoke() }
   } catch { }
 }
