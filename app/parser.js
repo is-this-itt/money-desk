@@ -435,7 +435,7 @@
 
       const t = text('type').toLowerCase();
       v.type = SVC_TYPES.find(x => x.toLowerCase() === t) || (t && (TYPE_WORDS.find(([, re]) => re.test(t)) || [])[0]) || '';
-      if (!v.type) { v.type = 'Other'; if (t) notes.push(`Type "${text('type').slice(0, 30)}" saved as Other`); }
+      if (!v.type) { v.type = 'Other'; if (t) notes.push(`Type "${redactDesc(text('type').slice(0, 30))}" saved as Other`); }
 
       const f = text('freq').toLowerCase();
       v.freq = SVC_FREQ.find(x => x.toLowerCase() === f) || (f && (FREQ_WORDS.find(([, re]) => re.test(f)) || [])[0]) || 'None';
