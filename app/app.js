@@ -197,6 +197,7 @@
     else if (prefs.view === 'import') main.innerHTML = viewImport();
     else if (prefs.view === 'settings') main.innerHTML = viewSettings();
     else if (prefs.view === 'services') main.innerHTML = viewServices();
+    else if (prefs.view === 'guide') main.innerHTML = viewGuide();
     else main.innerHTML = viewOverview();
     wire(main);
   }
@@ -207,7 +208,6 @@
     return `<div class="filters">
       <div class="field"><label for="f-period">Period</label><select id="f-period">${P.map(([v, l]) => `<option value="${v}" ${prefs.period === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label for="f-account">Account</label><select id="f-account"><option value="all">All accounts</option>${accts.map(a => `<option ${prefs.account === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></div>
-      <button class="icon-btn" id="theme-btn" title="Switch light / dark" aria-label="Switch light or dark theme"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
     </div>`;
   }
 
@@ -479,7 +479,7 @@
     const known = Object.keys(db.accounts);
     const names = [...new Set(known.concat(SUGGEST))];
     return `
-      <div class="top"><div><h1>Import statements</h1><div class="sub">Excel, CSV or PDF from net banking or your card's email. Files are read here and never leave your laptop.</div></div></div>
+      <div class="top"><div><h1>Import statements</h1><div class="sub">Excel, CSV or PDF from net banking or your card's email. Files are read on this laptop and never uploaded.</div></div></div>
       <div class="grid row-2-1">
         <div class="card">
           <div class="form-row">
@@ -495,13 +495,14 @@
           <div id="import-preview"></div>
         </div>
         <div class="card how">
-          <h2>Where to get each file</h2>
+          <h2>Before you import</h2>
           <ol style="padding-left:18px;margin:12px 0 0">
-            <li><b>SBI and Kotak savings:</b> net banking → Account statement → pick dates → download as <b>Excel</b>. Excel reads more reliably than PDF.</li>
-            <li><b>HDFC, ICICI and SBI cards:</b> the monthly statement PDF from your email. Enter its password when asked (usually based on your name and date of birth).</li>
-            <li><b>Investments:</b> SIPs and transfers to Groww or Wealthy show up from your bank statement as <b>Invested</b>.</li>
+            <li><b>Bank accounts:</b> download from net banking as <b>Excel</b> for the whole period at once.</li>
+            <li><b>Credit cards:</b> use the monthly PDFs from your email. Each locked PDF asks for its password.</li>
+            <li>Select several files at once. Each one shows a preview before anything is saved.</li>
           </ol>
-          <p class="note mt">Import the same file twice and nothing is duplicated. Card bill payments are counted once: they're marked as transfers so the purchases on the card aren't double-counted.</p>
+          <button class="btn mt" data-go="guide">Where to get each file</button>
+          <p class="note mt">Importing the same file twice adds nothing new. Card bill payments are marked as transfers, so card purchases aren't counted twice.</p>
         </div>
       </div>`;
   }
@@ -517,6 +518,7 @@
         res = await parseFile(f);
         if (res === 'password') res = await askPassword(f);
         if (res) showPreview(res, f);
+        else status.innerHTML = `<div class="note">Skipped ${esc(f.name)}.</div>`;
       } catch (e) {
         status.innerHTML = `<div class="note err">Couldn't read ${esc(f.name)}: ${esc(e.message || e)}. Try the Excel or CSV download instead.</div>`;
       }
@@ -567,24 +569,32 @@
     return { kind: 'table', opts, rows, det, ...MD.rowsToTxns(rows, det, opts) };
   }
 
-  // Resolves with the parsed file once a password works, or null if the file is skipped.
-  function askPassword(f, wrong) {
+  // Asks for a locked PDF's password in a dialog. Resolves with the parsed file once a
+  // password works, or null if the file is skipped. The password is never saved.
+  function askPassword(f) {
     return new Promise((resolve, reject) => {
-      $('#import-status').innerHTML = `<div class="note ${wrong ? 'err' : ''}">${wrong ? `That password didn't open <b>${esc(f.name)}</b>. Try again.` : `<b>${esc(f.name)}</b> is password-protected. Enter its password. It's only used to open this file and is never saved.`}</div>
-        <div class="form-row mt"><div><input class="input" type="password" id="pdf-pass" placeholder="Statement password" autocomplete="off"></div><button class="btn primary" id="pdf-go">Open</button><button class="btn" id="pdf-skip">Skip this file</button></div>`;
-      const go = async () => {
-        const pw = $('#pdf-pass').value;
-        if (!pw) return;
+      let result = null, failed = null;
+      const d = openDialog({
+        title: 'Password needed', size: 'sm',
+        body: `<p><b>${esc(f.name)}</b> is password-protected. Enter its password to open it. It's used only for this file and is never saved.</p>
+          <label class="fld">Statement password<input type="password" id="pdf-pass" autocomplete="off"></label>
+          <div id="pdf-err" class="mt" hidden><div class="note err">That password didn't open the file. Try again.</div></div>`,
+        foot: `<button class="btn" data-close>Skip this file</button><span class="spacer"></span><button class="btn primary" id="pdf-go">Open</button>`,
+        onClose: () => (failed ? reject(failed) : resolve(result)),
+      });
+      const input = d.querySelector('#pdf-pass'), go = d.querySelector('#pdf-go');
+      const tryOpen = async () => {
+        if (!input.value) return;
+        go.disabled = true;
         try {
-          const res = await parseFile(f, pw);
-          if (res === 'password') { askPassword(f, true).then(resolve, reject); return; }
-          resolve(res);
-        } catch (e) { reject(e); }
+          const res = await parseFile(f, input.value);
+          if (res === 'password') { d.querySelector('#pdf-err').hidden = false; input.select(); return; }
+          result = res; d.close();
+        } catch (e) { failed = e; d.close(); }
+        finally { go.disabled = false; }
       };
-      $('#pdf-go').onclick = go;
-      $('#pdf-skip').onclick = () => { $('#import-status').innerHTML = `<div class="note">Skipped ${esc(f.name)}.</div>`; resolve(null); };
-      $('#pdf-pass').onkeydown = e => { if (e.key === 'Enter') go(); };
-      $('#pdf-pass').focus();
+      go.onclick = tryOpen;
+      input.onkeydown = e => { if (e.key === 'Enter') tryOpen(); };
     });
   }
 
@@ -630,9 +640,41 @@
     $('#cancel-import').onclick = () => { $('#import-preview').innerHTML = ''; $('#import-status').innerHTML = ''; done(); };
   }
 
+  // ---------- Dialogs ----------
+  const X_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  // Opens a modal dialog. body and foot are HTML built by the caller with esc() applied.
+  // Esc or the close button closes it; onClose runs once however it closes.
+  function openDialog({ title, body, foot, size, onClose }) {
+    const d = document.createElement('dialog');
+    d.className = 'dlg' + (size ? ' ' + size : '');
+    d.setAttribute('aria-label', title);
+    d.innerHTML = `<div class="dlg-head"><h2>${esc(title)}</h2><button class="icon-btn ghost" data-close aria-label="Close">${X_ICON}</button></div>
+      <div class="dlg-body">${body}</div><div class="dlg-foot">${foot}</div>`;
+    document.body.appendChild(d);
+    d.querySelectorAll('[data-close]').forEach(b => (b.onclick = () => d.close()));
+    d.addEventListener('close', () => { d.remove(); if (onClose) onClose(); });
+    d.showModal();
+    const first = d.querySelector('input, select, .dlg-foot .btn.primary');
+    if (first) first.focus();
+    return d;
+  }
+  // Resolves true when the user confirms, false when they cancel or press Esc.
+  function confirmDialog(title, message, okLabel, danger) {
+    return new Promise(resolve => {
+      let ok = false;
+      const d = openDialog({
+        title, size: 'sm', body: `<p>${esc(message)}</p>`,
+        foot: `<span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary ${danger ? 'danger-fill' : ''}" data-ok>${esc(okLabel)}</button>`,
+        onClose: () => resolve(ok),
+      });
+      d.querySelector('[data-ok]').onclick = () => { ok = true; d.close(); };
+      d.querySelector('[data-ok]').focus();
+    });
+  }
+
   // ---------- My services ----------
-  let svcForm = null; // the entry being added or edited
   const ordinal = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+  const BLANK_SERVICE = { type: 'Subscription', name: '', provider: '', last4: '', amount: null, freq: 'Monthly', day: null, from: '', notes: '', active: true };
 
   // Accounts already imported and repeating payments that aren't on the list yet.
   function serviceSuggestions() {
@@ -645,30 +687,16 @@
       if (have.has(MD.merchantKey(r.merchant))) continue;
       const type = kindOf(r.category) === 'invest' ? 'SIP / investment' : r.category === 'Subscriptions' ? 'Subscription'
         : r.category === 'Insurance' ? 'Insurance' : r.category === 'EMI & loans' ? 'Loan / EMI' : 'Other';
-      out.push({ type, name: r.merchant, amount: Math.round(r.monthly), freq: 'Monthly', day: +r.last.slice(8, 10), why: `Paid ${r.months} months running` });
+      out.push({ type, name: r.merchant, amount: Math.round(r.monthly), freq: 'Monthly', day: +r.last.slice(8, 10), why: `Paid ${r.months} months in a row` });
     }
     return out;
   }
 
-  function serviceFormHTML() {
-    const v = svcForm;
-    const sel = (id, opts, cur) => `<select id="${id}">${opts.map(o => `<option ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-    return `<div class="card mt"><div class="card-head"><h2>${v.id ? 'Edit' : 'Add'} a service</h2></div>
-      <div class="svc-form">
-        <label>Type${sel('svc-type', SVC_TYPES, v.type)}</label>
-        <label>Name<input id="svc-name" maxlength="80" placeholder="e.g. Netflix, HDFC Regalia" value="${esc(v.name)}"></label>
-        <label>Bank or provider<input id="svc-provider" maxlength="60" placeholder="e.g. HDFC, Groww" value="${esc(v.provider)}"></label>
-        <label>Last 4 digits (optional)<input id="svc-last4" maxlength="4" inputmode="numeric" placeholder="1234" value="${esc(v.last4)}"></label>
-        <label>Amount, ₹<input id="svc-amount" inputmode="decimal" placeholder="e.g. 649" value="${v.amount == null ? '' : esc(v.amount)}"></label>
-        <label>How often${sel('svc-freq', SVC_FREQ, v.freq)}</label>
-        <label>Day of month (bill or debit)<input id="svc-day" inputmode="numeric" maxlength="2" placeholder="1–31" value="${v.day == null ? '' : esc(v.day)}"></label>
-        <label>Paid from<input id="svc-from" list="svc-accts" maxlength="60" placeholder="e.g. SBI Savings" value="${esc(v.from)}"><datalist id="svc-accts">${Object.keys(db.accounts).map(n => `<option value="${esc(n)}">`).join('')}</datalist></label>
-        <label class="wide">Notes<input id="svc-notes" maxlength="200" placeholder="e.g. renews in March, cancel before trial ends" value="${esc(v.notes)}"></label>
-      </div>
-      <p class="small muted">Don't put passwords, PINs, CVVs or full card or account numbers here. Long numbers are masked automatically.</p>
-      <div id="svc-err"></div>
-      <div class="form-row mt"><button class="btn primary" id="svc-save">${v.id ? 'Save changes' : 'Add to my services'}</button><button class="btn" id="svc-cancel">Cancel</button></div>
-    </div>`;
+  function serviceWhen(v) {
+    const amt = v.amount ? `<b class="num">${inr2.format(v.amount)}</b>` : '';
+    const freq = v.freq !== 'None' ? esc(v.freq.toLowerCase()) : '';
+    const day = v.day ? `on the ${ordinal(v.day)}` : '';
+    return [amt, [freq, day].filter(Boolean).join(' ')].filter(Boolean).join(' · ') || '<span class="muted">—</span>';
   }
 
   function viewServices() {
@@ -676,45 +704,139 @@
     const monthly = active.filter(v => v.amount && PER_MONTH[v.freq] && v.type !== 'Bank account' && v.type !== 'Credit card')
       .reduce((s, v) => s + v.amount * PER_MONTH[v.freq], 0);
     const sugg = serviceSuggestions();
-    const row = v => {
-      const sub = [v.provider, v.last4 ? '••' + v.last4 : ''].filter(Boolean).map(esc).join(' · ');
-      const when = [v.amount ? inr2.format(v.amount) + (v.freq !== 'None' ? ' · ' + esc(v.freq.toLowerCase()) : '') : (v.freq !== 'None' ? esc(v.freq) : ''), v.day ? `on the ${ordinal(v.day)}` : ''].filter(Boolean).join(' ');
-      return `<tr style="${v.active ? '' : 'opacity:.5'}"><td><b>${esc(v.name)}</b>${v.active ? '' : ' <span class="pill">Stopped</span>'}<div class="small muted">${sub}</div></td>
-        <td class="small">${when || '<span class="muted">—</span>'}</td><td class="small muted">${esc(v.from) || '—'}</td><td class="small muted">${esc(v.notes)}</td>
-        <td class="r" style="white-space:nowrap"><button class="btn small" data-svc-edit="${esc(v.id)}">Edit</button> <button class="btn small" data-svc-toggle="${esc(v.id)}">${v.active ? 'Mark stopped' : 'Mark active'}</button> <button class="btn small danger" data-svc-del="${esc(v.id)}">Delete</button></td></tr>`;
-    };
+    const tab = prefs.svcTab === 'suggestions' && sugg.length ? 'suggestions' : 'mine';
+    const row = v => `<tr class="click" tabindex="0" data-svc-edit="${esc(v.id)}" style="${v.active ? '' : 'opacity:.55'}">
+        <td><b>${esc(v.name)}</b>${v.active ? '' : ' <span class="pill">Stopped</span>'}<div class="small muted">${[v.provider, v.last4 ? '••' + v.last4 : ''].filter(Boolean).map(esc).join(' · ')}</div></td>
+        <td class="small">${serviceWhen(v)}</td>
+        <td class="small muted">${esc(v.from) || '—'}</td>
+        <td class="small muted">${esc(v.notes)}</td>
+        <td class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></td></tr>`;
     const groups = SVC_TYPES.map(t => [t, db.services.filter(v => v.type === t).sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name))]).filter(([, l]) => l.length);
+    const mine = groups.length
+      ? groups.map(([t, l]) => `<div class="card mt"><div class="card-head"><h2>${esc(t)}</h2><span class="hint">${l.length}</span></div>
+          <table class="list"><thead><tr><th>Name</th><th>Amount and date</th><th>Paid from</th><th>Notes</th><th></th></tr></thead><tbody>${l.map(row).join('')}</tbody></table></div>`).join('')
+      : `<div class="card empty mt">
+          <svg width="56" height="56" viewBox="0 0 64 64" fill="none"><rect x="8" y="14" width="48" height="36" rx="7" fill="var(--accent-soft)"/><path d="M8 26h48M18 40h12" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/></svg>
+          <h2>Keep every service in one place</h2>
+          <p>Add your bank accounts, cards, subscriptions, autopay mandates, SIPs, insurance and loans.${sugg.length ? ` ${sugg.length} suggestions from your statements are ready to add.` : ''}</p>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn primary" data-act="svc-new">Add a service</button>${sugg.length ? `<button class="btn" data-svc-tab="suggestions">See suggestions</button>` : ''}</div>
+        </div>`;
+    const suggestions = `<div class="card mt"><p class="muted" style="margin-top:0">Found in your statements. Check the details before adding: the amount is the typical monthly payment.</p>
+        <table class="list"><thead><tr><th>Name</th><th>Type</th><th class="r">Typical amount</th><th></th></tr></thead><tbody>${sugg.map((x, i) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.why)}</div></td><td><span class="pill">${esc(x.type)}</span></td><td class="r num">${x.amount ? money(x.amount) + ' a month' : '<span class="muted">—</span>'}</td><td class="r"><button class="btn small" data-svc-sugg="${i}">Review and add</button></td></tr>`).join('')}</tbody></table></div>`;
     return `
-      <div class="top"><div><h1>My services</h1><div class="sub">Every account, card, subscription, mandate, SIP and policy you have, in one place. Saved only on this laptop.</div></div>
-        <button class="btn primary" data-act="svc-new">Add a service</button></div>
-      ${svcForm ? serviceFormHTML() : ''}
-      <div class="grid kpis mt">
-        <div class="card kpi"><div class="label">Active services</div><div class="value num">${active.length}</div></div>
-        <div class="card kpi"><div class="label">Regular payments a month</div><div class="value num">${money(monthly)}</div><div class="small muted">Subscriptions, mandates, SIPs, insurance and EMIs with an amount</div></div>
-        <div class="card kpi"><div class="label">A year</div><div class="value num">${money(monthly * 12)}</div></div>
-        <div class="card kpi"><div class="label">Stopped</div><div class="value num">${db.services.length - active.length}</div></div>
+      <div class="top"><div><h1>My services</h1><div class="sub">Accounts, cards, subscriptions, mandates, SIPs and policies, in one list on this laptop</div></div>
+        <button class="btn primary" data-act="svc-new"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>Add a service</button></div>
+      <div class="grid kpis">
+        <div class="card kpi"><div class="label">Active</div><div class="value num">${active.length}</div><div class="delta">${db.services.length - active.length ? `${db.services.length - active.length} stopped` : ''}</div></div>
+        <div class="card kpi"><div class="label">Regular payments a month</div><div class="value num">${money(monthly)}</div><div class="delta">Subscriptions, mandates, SIPs, insurance, EMIs</div></div>
+        <div class="card kpi"><div class="label">A year</div><div class="value num">${money(monthly * 12)}</div><div class="delta">At today's amounts</div></div>
+        <div class="card kpi"><div class="label">To review</div><div class="value num">${sugg.length}</div><div class="delta">Suggestions from statements</div></div>
       </div>
-      ${groups.length ? groups.map(([t, l]) => `<div class="card mt"><div class="card-head"><h2>${esc(t)}</h2><span class="hint">${l.length}</span></div>
-        <table class="list"><thead><tr><th>Name</th><th>Amount and date</th><th>Paid from</th><th>Notes</th><th></th></tr></thead><tbody>${l.map(row).join('')}</tbody></table></div>`).join('')
-        : `<div class="card mt empty"><h2>Nothing here yet</h2><p>Add your bank accounts, cards, subscriptions, autopay mandates, SIPs and insurance, or pick from the suggestions below.</p></div>`}
-      ${sugg.length ? `<div class="card mt"><div class="card-head"><h2>Suggestions from your statements</h2><span class="hint">${sugg.length}</span></div>
-        <table class="list"><tbody>${sugg.map((x, i) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.why)}</div></td><td><span class="pill">${esc(x.type)}</span></td><td class="r num">${x.amount ? money(x.amount) + ' a month' : ''}</td><td class="r"><button class="btn small" data-svc-sugg="${i}">Add</button></td></tr>`).join('')}</tbody></table></div>` : ''}`;
+      <div class="tabs mt" role="tablist">
+        <button class="tab" role="tab" aria-selected="${tab === 'mine'}" data-svc-tab="mine">Your services<span class="count">${db.services.length}</span></button>
+        <button class="tab" role="tab" aria-selected="${tab === 'suggestions'}" data-svc-tab="suggestions" ${sugg.length ? '' : 'disabled'}>Suggestions<span class="count">${sugg.length}</span></button>
+      </div>
+      ${tab === 'mine' ? mine : suggestions}`;
   }
 
-  function saveServiceForm() {
-    const val = id => $('#' + id).value;
-    const last4 = val('svc-last4').trim(), day = val('svc-day').trim(), amount = val('svc-amount').replace(/[₹,\s]/g, '');
-    const err = !val('svc-name').trim() ? 'Give it a name.'
-      : last4 && !/^\d{4}$/.test(last4) ? 'Last 4 digits must be exactly 4 numbers.'
-      : amount && !(+amount > 0) ? 'Amount must be a number, like 649.'
-      : day && !(Number.isInteger(+day) && +day >= 1 && +day <= 31) ? 'Day of month must be between 1 and 31.' : '';
-    if (err) { $('#svc-err').innerHTML = `<div class="note err">${esc(err)}</div>`; return; }
-    const str = (v, max) => String(v == null ? '' : v).slice(0, max);
-    const v = cleanService({ id: svcForm.id, type: val('svc-type'), name: val('svc-name'), provider: val('svc-provider'), last4, amount, freq: val('svc-freq'), day: day ? +day : null, from: val('svc-from'), notes: val('svc-notes'), active: svcForm.active }, str);
-    const i = db.services.findIndex(x => x.id === v.id);
-    if (i >= 0) db.services[i] = v; else db.services.push(v);
-    svcForm = null; save(); render();
-    toast(`Saved ${esc(v.name)}.`);
+  // Add or edit one service in a dialog.
+  function serviceDialog(start) {
+    const v = Object.assign({}, BLANK_SERVICE, start);
+    const editing = !!v.id && db.services.some(x => x.id === v.id);
+    const sel = (id, opts, cur) => `<select id="${id}">${opts.map(o => `<option ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    const d = openDialog({
+      title: editing ? `Edit ${v.name}` : 'Add a service',
+      body: `<div class="form-grid">
+          <label class="fld">Type${sel('svc-type', SVC_TYPES, v.type)}</label>
+          <label class="fld">Name<input id="svc-name" maxlength="80" placeholder="e.g. Netflix, HDFC Regalia" value="${esc(v.name)}"></label>
+          <label class="fld">Bank or provider<input id="svc-provider" maxlength="60" placeholder="e.g. HDFC, Groww" value="${esc(v.provider)}"></label>
+          <label class="fld">Last 4 digits<input id="svc-last4" maxlength="4" inputmode="numeric" placeholder="Optional, e.g. 1234" value="${esc(v.last4)}"></label>
+          <label class="fld">Amount (₹)<input id="svc-amount" inputmode="decimal" placeholder="e.g. 649" value="${v.amount == null ? '' : esc(v.amount)}"></label>
+          <label class="fld">How often${sel('svc-freq', SVC_FREQ, v.freq)}</label>
+          <label class="fld">Bill or debit day<input id="svc-day" inputmode="numeric" maxlength="2" placeholder="1–31" value="${v.day == null ? '' : esc(v.day)}"></label>
+          <label class="fld">Paid from<input id="svc-from" list="svc-accts" maxlength="60" placeholder="e.g. SBI Savings" value="${esc(v.from)}"><datalist id="svc-accts">${Object.keys(db.accounts).map(n => `<option value="${esc(n)}">`).join('')}</datalist></label>
+          <label class="fld wide">Notes<input id="svc-notes" maxlength="200" placeholder="e.g. renews in March, cancel before the trial ends" value="${esc(v.notes)}"></label>
+        </div>
+        <p class="small muted" style="margin:12px 0 0">Don't enter passwords, PINs, CVVs or full card or account numbers. Long numbers are masked automatically.</p>
+        <div id="svc-err" class="mt" hidden></div>`,
+      foot: `${editing ? `<button class="btn danger" data-svc-delete>Delete</button><button class="btn" data-svc-toggle>${v.active ? 'Mark as stopped' : 'Mark as active'}</button>` : ''}
+        <span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-svc-save>${editing ? 'Save changes' : 'Add service'}</button>`,
+    });
+    const val = id => d.querySelector('#' + id).value;
+    const save1 = active => {
+      const last4 = val('svc-last4').trim(), day = val('svc-day').trim(), amount = val('svc-amount').replace(/[₹,\s]/g, '');
+      const err = !val('svc-name').trim() ? 'Give it a name.'
+        : last4 && !/^\d{4}$/.test(last4) ? 'Last 4 digits must be exactly 4 numbers.'
+        : amount && !(+amount > 0) ? 'Amount must be a number, like 649.'
+        : day && !(Number.isInteger(+day) && +day >= 1 && +day <= 31) ? 'Day of month must be between 1 and 31.' : '';
+      const box = d.querySelector('#svc-err');
+      if (err) { box.hidden = false; box.innerHTML = `<div class="note err">${esc(err)}</div>`; return; }
+      const str = (x, max) => String(x == null ? '' : x).slice(0, max);
+      const out = cleanService({ id: editing ? v.id : undefined, type: val('svc-type'), name: val('svc-name'), provider: val('svc-provider'), last4, amount, freq: val('svc-freq'), day: day ? +day : null, from: val('svc-from'), notes: val('svc-notes'), active }, str);
+      const i = db.services.findIndex(x => x.id === out.id);
+      if (i >= 0) db.services[i] = out; else db.services.push(out);
+      if (!editing) prefs.svcTab = 'mine';
+      save(); d.close(); render();
+      toast(`${editing ? 'Saved' : 'Added'} ${esc(out.name)}.`);
+    };
+    d.querySelector('[data-svc-save]').onclick = () => save1(v.active);
+    d.querySelectorAll('input').forEach(i => (i.onkeydown = e => { if (e.key === 'Enter') save1(v.active); }));
+    const tg = d.querySelector('[data-svc-toggle]');
+    if (tg) tg.onclick = () => save1(!v.active);
+    const del = d.querySelector('[data-svc-delete]');
+    if (del) del.onclick = async () => {
+      d.close();
+      if (!(await confirmDialog('Delete service?', `"${v.name}" will be removed from My services. Your transactions are not affected.`, 'Delete', true))) return;
+      db.services = db.services.filter(x => x.id !== v.id); save(); render();
+    };
+  }
+
+  // ---------- Where to get files ----------
+  // Official sites only. Links open in your normal browser; Money Desk itself never goes online.
+  const GUIDE = [
+    ['Bank statements', 'Download once for a long date range, as Excel (XLS/XLSX) when offered.', [
+      { name: 'SBI savings', what: 'Account statement, Excel', url: 'https://www.onlinesbi.sbi/', steps: ['Log in to SBI Online (Personal Banking).', 'My Accounts & Profile → Account Statement.', 'Choose a date range of up to 6 months or a year, then download as Excel.'] },
+      { name: 'Kotak savings', what: 'Account statement, Excel', url: 'https://netbanking.kotak.com/', steps: ['Log in to Kotak net banking (or the Kotak app).', 'Accounts → Statements → Account statement.', 'Pick a custom date range and download as Excel.'] },
+    ]],
+    ['Credit card statements', 'Monthly PDFs, usually password-protected. The password rule is in each email.', [
+      { name: 'HDFC credit card', what: 'Monthly statement PDF', url: 'https://netbanking.hdfcbank.com/', steps: ['Fastest: search your email for "HDFC Bank Credit Card Statement" and save each month\'s PDF.', 'Or: net banking → Cards → Credit card → View statements.'] },
+      { name: 'ICICI credit card', what: 'Monthly statement PDF', url: 'https://www.icicibank.com/', steps: ['Search your email for "ICICI Bank Credit Card Statement".', 'Or: internet banking → Cards & Loans → Credit cards → Statements.'] },
+      { name: 'SBI Card', what: 'Monthly statement PDF', url: 'https://www.sbicard.com/', steps: ['Search your email for "SBI Card Monthly Statement".', 'Or: log in at sbicard.com → Statements → download past statements.'] },
+    ]],
+    ['Investments', 'One consolidated statement covers every mutual fund, whichever app you used.', [
+      { name: 'Mutual funds (CAMS + KFintech CAS)', what: 'All folios, SIPs and holdings across Groww, Wealthy and others', url: 'https://www.camsonline.com/', steps: ['camsonline.com → Investors → Statements → CAS (CAMS + KFintech).', 'Choose Detailed, a date range, and your email. Set a password.', 'The PDF arrives by email in a few minutes.'] },
+      { name: 'KFintech (alternative)', what: 'Same consolidated statement from the other registrar', url: 'https://mfs.kfintech.com/', steps: ['mfs.kfintech.com → Investor services → Consolidated account statement.'] },
+      { name: 'About CAS (AMFI)', what: 'Official explanation of what the CAS contains', url: 'https://www.amfiindia.com/investor-corner/investor-center/cas.html', steps: ['Read this if you are unsure which statement to request.'] },
+      { name: 'Shares and demat (NSDL / CDSL CAS)', what: 'Stocks, ETFs and bonds in your demat account', url: 'https://nsdl.com/investor/know-your-cas', steps: ['A monthly CAS is emailed if your demat account had activity.', 'Groww and Wealthy also show holdings and SIPs in their apps.'] },
+      { name: 'Groww', what: 'Orders, SIPs and holdings', url: 'https://groww.in/', steps: ['Profile → Reports → download holdings and transaction reports.'] },
+      { name: 'Wealthy', what: 'Portfolio and SIPs', url: 'https://www.wealthy.in/', steps: ['App → Portfolio → reports or statements.'] },
+    ]],
+    ['Find every account, card and loan', 'Good for building My services and catching things you have forgotten.', [
+      { name: 'Credit report (CIBIL)', what: 'Every loan and credit card in your name, open or closed', url: 'https://www.cibil.com/', steps: ['One free report a year from each bureau.', 'Lists all lenders, card limits and EMIs.'] },
+      { name: 'Credit report (Experian)', what: 'Second bureau, also free once a year', url: 'https://www.experian.in/', steps: ['Useful to cross-check the CIBIL report.'] },
+    ]],
+    ['Mandates, autopay and subscriptions', 'Recurring debits that are easy to forget.', [
+      { name: 'UPI Autopay', what: 'Mandates set up through GPay, PhonePe, Paytm or BHIM', url: 'https://www.bhimupi.org.in/upiautopay', steps: ['Open each UPI app → Autopay / Mandates to see active ones.', 'You can pause or revoke a mandate there.'] },
+      { name: 'UPI Help (NPCI)', what: 'Complaints and mandate help across banks', url: 'https://upihelp.npci.org.in/', steps: ['Use this if a mandate is not visible in any of your apps.'] },
+      { name: 'NACH and card standing instructions', what: 'EMIs, SIPs and bills debited from the bank or card', url: '', steps: ['SBI / Kotak net banking → e-Mandate or Standing instructions.', 'Each card portal → Standing instructions / Autopay.'] },
+      { name: 'Email search', what: 'Subscriptions paid by card or UPI', url: '', steps: ['Search for "mandate registered", "auto-renew", "subscription" and "receipt".', 'Add each one to My services.'] },
+    ]],
+  ];
+  const EXT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
+
+  function viewGuide() {
+    return `
+      <div class="top"><div><h1>Where to get files</h1><div class="sub">Where to download each statement and report, and what to ask for. Links open the official site in your browser.</div></div>
+        <button class="btn primary" data-go="import">Import statements</button></div>
+      <div class="guide-nav">${GUIDE.map(([h], i) => `<button class="btn small" data-jump="g${i}">${esc(h)}</button>`).join('')}</div>
+      ${GUIDE.map(([h, sub, items], i) => `
+        <div class="guide-h" id="g${i}">${esc(h)}</div><p class="muted" style="margin:-6px 0 12px">${esc(sub)}</p>
+        <div class="guide-grid">${items.map(it => `<div class="card guide-item">
+          <h3>${esc(it.name)}</h3><div class="what">${esc(it.what)}</div>
+          <ol>${it.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
+          ${it.url ? `<a class="btn small" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(it.url).hostname.replace(/^www\./, ''))} ${EXT_ICON}</a>` : ''}
+        </div>`).join('')}</div>`).join('')}
+      <p class="note mt">Money Desk never downloads anything itself. These are the official sites; check the address bar before you log in.</p>`;
   }
 
   // ---------- Settings ----------
@@ -725,20 +847,22 @@
       a.n++; if (t.date < a.from) a.from = t.date; if (t.date > a.to) a.to = t.date;
     }
     const rules = Object.entries(db.rules);
+    const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
     return `
-      <div class="top"><div><h1>Accounts &amp; data</h1><div class="sub">Your accounts, category rules and where your data is kept</div></div></div>
-      <div class="grid row-1-1">
-        <div class="card"><div class="card-head"><h2>Accounts</h2></div>
-          ${Object.keys(accts).length ? `<table class="list"><thead><tr><th>Account</th><th>Covers</th><th class="r">Transactions</th><th></th></tr></thead><tbody>${Object.entries(accts).sort().map(([n, a]) => `
-            <tr><td><b>${esc(n)}</b><div class="small muted">${(db.accounts[n] || {}).kind === 'card' ? 'Credit card' : 'Bank account'}</div></td><td class="small muted">${fmtDate(a.from)} – ${fmtDate(a.to)}</td><td class="r num">${a.n}</td><td class="r"><button class="btn small danger" data-del-acct="${esc(n)}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No accounts yet.</p>'}
-        </div>
-        <div class="card"><div class="card-head"><h2>Your category rules</h2><span class="hint">${rules.length} saved</span></div>
-          ${rules.length ? `<table class="list"><tbody>${rules.sort().map(([k, c]) => `<tr><td>${esc(k)}</td><td><span class="pill">${esc(c)}</span></td><td class="r"><button class="btn small" data-del-rule="${esc(k)}">Remove</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">When you change a category in Transactions and choose "apply to future imports", the rule shows up here.</p>'}
-        </div>
-      </div>
-      <div class="card mt"><div class="card-head"><h2>Backup</h2></div>
-        <p class="muted" style="margin-top:0">${fileMode ? 'Your data is saved in <b>data\\money-desk.json</b> inside your Money Desk folder, and a copy is kept in <b>data\\backups</b> for each of the last 30 days. Clearing browser data does not touch it. For extra safety, download a backup to another drive or cloud folder now and then.' : '<b>Not connected to your data file.</b> Open Money Desk from its Start menu shortcut so changes are saved to disk. Until then they are kept only in this browser.'}</p>
-        <div class="form-row"><button class="btn primary" data-act="backup">Download backup</button><button class="btn" data-act="restore">Restore from backup</button><button class="btn" data-act="load-sample">Load sample data</button><button class="btn danger" data-act="clear">Delete everything</button></div>
+      <div class="top"><div><h1>Settings</h1><div class="sub">Appearance, accounts, category rules and your data file</div></div></div>
+      <div class="card">
+        <div class="section"><div><h2>Appearance</h2><div class="desc">Light is the default.</div></div>
+          <div><div class="seg" role="group" aria-label="Theme"><button data-theme-set="light" aria-pressed="${theme === 'light'}">Light</button><button data-theme-set="dark" aria-pressed="${theme === 'dark'}">Dark</button></div></div></div>
+        <div class="section"><div><h2>Accounts</h2><div class="desc">Every account you have imported statements for.</div></div>
+          <div>${Object.keys(accts).length ? `<table class="list"><thead><tr><th>Account</th><th>Covers</th><th class="r">Transactions</th><th></th></tr></thead><tbody>${Object.entries(accts).sort().map(([n, a]) => `
+            <tr><td><b>${esc(n)}</b><div class="small muted">${(db.accounts[n] || {}).kind === 'card' ? 'Credit card' : 'Bank account'}</div></td><td class="small muted">${fmtDate(a.from)} – ${fmtDate(a.to)}</td><td class="r num">${a.n}</td><td class="r"><button class="btn small danger" data-del-acct="${esc(n)}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">No accounts yet. <a href="#" data-go="import">Import a statement</a>.</p>'}</div></div>
+        <div class="section"><div><h2>Category rules</h2><div class="desc">Merchants you told Money Desk to always put in a category.</div></div>
+          <div>${rules.length ? `<table class="list"><tbody>${rules.sort().map(([k, c]) => `<tr><td>${esc(k)}</td><td><span class="pill">${esc(c)}</span></td><td class="r"><button class="btn small" data-del-rule="${esc(k)}">Remove</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">None yet. When you change a category in Transactions and choose "Apply to future imports", the rule shows up here.</p>'}</div></div>
+        <div class="section"><div><h2>Your data file</h2><div class="desc">${fileMode ? 'Saved on this laptop, with daily copies for 30 days.' : '<b>Not connected.</b> Open Money Desk from its Start menu shortcut so changes are saved to disk.'}</div></div>
+          <div><p class="muted" style="margin-top:0">${fileMode ? 'Your data is in <b>data\\money-desk.json</b> inside your Money Desk folder, with a copy for each of the last 30 days in <b>data\\backups</b>. For extra safety, download a backup to another drive now and then.' : 'Until then, changes are kept only in this window\'s browser storage.'}</p>
+            <div class="form-row"><button class="btn primary" data-act="backup">Download backup</button><button class="btn" data-act="restore">Restore from backup</button><button class="btn" data-act="load-sample">Load sample data</button></div></div></div>
+        <div class="section"><div><h2>Delete everything</h2><div class="desc">Removes every transaction, account, rule and service.</div></div>
+          <div><button class="btn danger" data-act="clear">Delete everything…</button></div></div>
       </div>`;
   }
 
@@ -749,12 +873,11 @@
     const per = $('#f-period', root), acc = $('#f-account', root);
     if (per) per.onchange = () => { prefs.period = per.value; savePrefs(); render(); };
     if (acc) acc.onchange = () => { prefs.account = acc.value; savePrefs(); render(); };
-    const th = $('#theme-btn', root);
-    if (th) th.onclick = () => {
-      const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.dataset.theme = dark ? 'light' : 'dark';
-      prefs.theme = document.documentElement.dataset.theme; savePrefs();
-    };
+    root.querySelectorAll('[data-theme-set]').forEach(b => (b.onclick = () => {
+      prefs.theme = b.dataset.themeSet; savePrefs();
+      document.documentElement.dataset.theme = prefs.theme; render();
+    }));
+    root.querySelectorAll('[data-jump]').forEach(b => (b.onclick = () => { const t = document.getElementById(b.dataset.jump); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
     root.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => { txFilter.category = b.dataset.cat; txFilter.q = ''; setView('transactions'); }));
     drawTrend();
     // Transactions
@@ -787,34 +910,27 @@
       };
     }
     // Settings
-    root.querySelectorAll('[data-del-acct]').forEach(b => b.onclick = () => {
+    root.querySelectorAll('[data-del-acct]').forEach(b => b.onclick = async () => {
       const n = b.dataset.delAcct;
-      if (!confirm(`Delete all ${db.txns.filter(t => t.account === n).length} transactions in "${n}"?`)) return;
+      if (!(await confirmDialog(`Delete ${n}?`, `All ${db.txns.filter(t => t.account === n).length} transactions in "${n}" will be removed. You can import the statements again later.`, 'Delete account', true))) return;
       db.txns = db.txns.filter(t => t.account !== n); delete db.accounts[n];
       if (prefs.account === n) prefs.account = 'all';
       save(); render();
     });
     root.querySelectorAll('[data-del-rule]').forEach(b => b.onclick = () => { delete db.rules[b.dataset.delRule]; save(); render(); });
     // My services
-    const blank = { type: 'Subscription', name: '', provider: '', last4: '', amount: null, freq: 'Monthly', day: null, from: '', notes: '', active: true };
-    const openForm = v => { svcForm = Object.assign({}, blank, v); render(); const n = $('#svc-name'); if (n) { n.focus(); n.scrollIntoView({ block: 'center' }); } };
-    root.querySelectorAll('[data-svc-edit]').forEach(b => b.onclick = () => openForm(db.services.find(v => v.id === b.dataset.svcEdit)));
-    root.querySelectorAll('[data-svc-sugg]').forEach(b => b.onclick = () => openForm(serviceSuggestions()[+b.dataset.svcSugg]));
-    root.querySelectorAll('[data-svc-toggle]').forEach(b => b.onclick = () => { const v = db.services.find(x => x.id === b.dataset.svcToggle); if (v) { v.active = !v.active; save(); render(); } });
-    root.querySelectorAll('[data-svc-del]').forEach(b => b.onclick = () => {
-      const v = db.services.find(x => x.id === b.dataset.svcDel);
-      if (!v || !confirm(`Delete "${v.name}" from My services?`)) return;
-      db.services = db.services.filter(x => x !== v); save(); render();
+    root.querySelectorAll('[data-svc-edit]').forEach(r => {
+      const open = () => serviceDialog(db.services.find(v => v.id === r.dataset.svcEdit));
+      r.onclick = open;
+      r.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
     });
-    const svcSave = $('#svc-save', root);
-    if (svcSave) { svcSave.onclick = saveServiceForm; $('#svc-cancel', root).onclick = () => { svcForm = null; render(); }; }
+    root.querySelectorAll('[data-svc-sugg]').forEach(b => (b.onclick = () => serviceDialog(serviceSuggestions()[+b.dataset.svcSugg])));
+    root.querySelectorAll('[data-svc-tab]').forEach(b => (b.onclick = () => { prefs.svcTab = b.dataset.svcTab; savePrefs(); render(); }));
   }
 
   function act(a) {
-    if (a === 'svc-new') {
-      svcForm = { type: 'Subscription', name: '', provider: '', last4: '', amount: null, freq: 'Monthly', day: null, from: '', notes: '', active: true };
-      render(); $('#svc-name').focus();
-    } else if (a === 'load-sample') {
+    if (a === 'svc-new') serviceDialog({});
+    else if (a === 'load-sample') {
       const sample = window.MDSample.build(MD, new Date());
       const have = new Set(db.txns.map(t => t.id));
       db.txns.push(...sample.filter(t => !have.has(t.id)));
@@ -837,14 +953,16 @@
         try {
           const d = JSON.parse(await f.text());
           if (!Array.isArray(d.txns)) throw new Error('not a Money Desk backup');
-          if (!confirm(`Replace current data with ${d.txns.length} transactions from this backup?`)) return;
+          if (!(await confirmDialog('Restore this backup?', `Your current data will be replaced with the ${d.txns.length} transactions in this backup.`, 'Restore'))) return;
           db = sanitize(d); refreshParsed(); save(); render(); toast('Backup restored.');
         } catch (e) { toast("That file isn't a Money Desk backup."); }
       };
       fi.click();
     } else if (a === 'clear') {
-      if (!confirm('Delete every transaction, account and rule from Money Desk? Download a backup first if you might want them.')) return;
-      db = { txns: [], rules: {}, accounts: {}, services: [], parserVersion: MD.PARSER_VERSION }; save(); setView('overview');
+      confirmDialog('Delete everything?', 'Every transaction, account, rule and service will be removed from Money Desk. Download a backup first if you might want them.', 'Delete everything', true).then(ok => {
+        if (!ok) return;
+        db = { txns: [], rules: {}, accounts: {}, services: [], parserVersion: MD.PARSER_VERSION }; save(); setView('overview');
+      });
     }
   }
 
