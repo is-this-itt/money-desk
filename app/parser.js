@@ -620,7 +620,7 @@
   const SHAPE_WORDS = new Set(['WDL', 'DEP', 'TFR', 'UPI', 'DR', 'CR', 'AT', 'NEFT', 'IMPS', 'RTGS', 'ACH', 'ACHDR', 'NACH', 'ECS',
     'DEBIT', 'CREDIT', 'ATM', 'ATL', 'PCD', 'POS', 'INB', 'CMP', 'BIL', 'ONL', 'ECOM', 'REV', 'INT', 'FROM', 'TRANSFER', 'SWEEP',
     'TRF', 'XFR', 'CHQ', 'CLG', 'EMI', 'FEE', 'CHARGES', 'GST', 'INTEREST', 'CASHBACK', 'REFUND', 'REVERSAL', 'SALARY', 'PAYMENT',
-    'BILL', 'CARD', 'AUTOPAY', 'MANDATE']);
+    'CARD', 'AUTOPAY', 'MANDATE']);
   function lineShape(desc) {
     return clean(desc).slice(0, 200)
       // Words and numbers in any script: a name written in Devanagari is still just "a".
@@ -631,8 +631,9 @@
   }
 
   // Saved lines go through redactDesc, which leaves at most 4 digits of a number and 2 letters
-  // of a UPI ID; anything longer means a number or ID got through unmasked.
-  const UNMASKED_DESC = /\d{6,}|[\w.+-]{3,}@[a-z]/i;
+  // of a UPI ID; anything longer means a number or ID got through unmasked. Numbers written in
+  // groups ("98765 43210") slip past redactDesc, so they count too.
+  const UNMASKED_DESC = /\d{6,}|\b\d{4,6}(?:[ -]\d{4,6})+\b|[\w.+-]{3,}@[a-z]/i;
   const UNMASKED_MERCHANT = /\d{5,}|@/;
 
   // Per account: rows, rows in Other / Other income, rows that may still hold an unmasked
@@ -646,16 +647,11 @@
       a.rows++;
       const desc = String(t.desc || '');
       const merchant = String(t.merchant || '');
-      if (UNMASKED_DESC.test(desc) || UNMASKED_MERCHANT.test(merchant)) {
-        a.unmasked++;
-        const sh = lineShape(desc);
-        a.unmaskedShapes.set(sh, (a.unmaskedShapes.get(sh) || 0) + 1);
-      }
-      if (t.category === 'Other' || t.category === 'Other income') {
-        a.unread++;
-        const sh = lineShape(desc);
-        a.shapes.set(sh, (a.shapes.get(sh) || 0) + 1);
-      }
+      const unmasked = UNMASKED_DESC.test(desc) || UNMASKED_MERCHANT.test(merchant);
+      const unread = t.category === 'Other' || t.category === 'Other income';
+      const sh = unmasked || unread ? lineShape(desc) : '';
+      if (unmasked) { a.unmasked++; a.unmaskedShapes.set(sh, (a.unmaskedShapes.get(sh) || 0) + 1); }
+      if (unread) { a.unread++; a.shapes.set(sh, (a.shapes.get(sh) || 0) + 1); }
     }
     return [...by.values()].sort((x, y) => String(x.account).localeCompare(String(y.account))).map(a => ({
       account: a.account, rows: a.rows, unread: a.unread, unmasked: a.unmasked, shapes: top(a.shapes), unmaskedShapes: top(a.unmaskedShapes),

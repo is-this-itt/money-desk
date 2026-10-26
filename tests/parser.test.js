@@ -313,4 +313,7 @@ test('reading check: layouts keep only bank words, counts flag unread and unmask
   assert.ok(!/Shop|Acme|Rahul|rahul|123456789/.test(JSON.stringify(rep.map(a => [a.shapes, a.unmaskedShapes]))));
   assert.strictEqual(MD.readingReport(txns, 1)[1].shapes.length, 1);
   assert.deepStrictEqual(MD.readingReport([]), []);
+  // A phone number written in two groups passes masking, so the check flags it.
+  assert.strictEqual(MD.readingReport([{ account: 'C', desc: MD.redactDesc('UPI/CALL 98765 43210/UPI'), merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 1);
+  assert.strictEqual(MD.lineShape('BILL PAYMENT'), 'a PAYMENT');
 });
