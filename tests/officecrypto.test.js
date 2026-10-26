@@ -41,3 +41,18 @@ test('plain files are not treated as encrypted', () => {
   assert.strictEqual(C.isEncrypted(XLSX.CFB, new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' }))), false);
   assert.strictEqual(C.isEncrypted(XLSX.CFB, new Uint8Array(XLSX.write(wb, { bookType: 'biff8', type: 'array' }))), false);
 });
+
+test('file values that could hang or exhaust the page are refused', async () => {
+  const tamper = (from, to) => {
+    const cfb = XLSX.CFB.read(load('locked-agile.xlsx'), { type: 'array' });
+    const e = XLSX.CFB.find(cfb, 'EncryptionInfo');
+    e.content = Buffer.from(Buffer.from(e.content).toString('latin1').replace(from, to), 'latin1');
+    return new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' }));
+  };
+  await assert.rejects(C.decrypt(XLSX.CFB, tamper(/spinCount="\d+"/, 'spinCount="4000000000"'), 'test1234'), /Unsupported/);
+  await assert.rejects(C.decrypt(XLSX.CFB, tamper(/(keyData[^>]*?)blockSize="16"/, '$1blockSize="32"'), 'test1234'), /Unsupported/);
+  const cfb = XLSX.CFB.read(load('locked-standard.xlsx'), { type: 'array' });
+  const pkg = XLSX.CFB.find(cfb, 'EncryptedPackage');
+  const c = Buffer.from(pkg.content); c.writeUInt32LE(0xffffff00, 0); pkg.content = c;
+  await assert.rejects(C.decrypt(XLSX.CFB, new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' })), 'test1234'), /Damaged/);
+});

@@ -909,7 +909,7 @@
         <div class="guide-grid">${items.map(it => `<div class="card guide-item">
           <h3>${esc(it.name)}</h3><div class="what">${esc(it.what)}</div>
           <ol>${it.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
-          ${it.url ? `<a class="btn small" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(it.url).hostname.replace(/^www\./, ''))} ${EXT_ICON}</a>` : ''}
+          ${it.url ? `<a class="btn small" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer" data-ext>${esc(new URL(it.url).hostname.replace(/^www\./, ''))} ${EXT_ICON}</a>` : ''}
         </div>`).join('')}</div>`).join('')}
       <p class="note mt">Money Desk never downloads anything itself. These are the official sites; check the address bar before you log in.</p>`;
   }
@@ -951,6 +951,15 @@
     root.querySelectorAll('[data-theme-set]').forEach(b => (b.onclick = () => {
       prefs.theme = b.dataset.themeSet; savePrefs();
       document.documentElement.dataset.theme = prefs.theme; render();
+    }));
+    // With the helper running, guide links open in your usual browser (Chrome when installed)
+    // instead of the browser that hosts the app window.
+    root.querySelectorAll('a[data-ext]').forEach(a => (a.onclick = e => {
+      if (!fileMode) return;
+      e.preventDefault();
+      fetch('/api/open', { method: 'POST', headers: { 'X-Money-Desk': HELPER_KEY, 'Content-Type': 'text/plain' }, body: a.href })
+        .then(r => { if (!r.ok) throw new Error(r.status); })
+        .catch(() => window.open(a.href, '_blank', 'noopener,noreferrer'));
     }));
     root.querySelectorAll('[data-jump]').forEach(b => (b.onclick = () => { const t = document.getElementById(b.dataset.jump); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
     root.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => { txFilter.category = b.dataset.cat; txFilter.q = ''; setView('transactions'); }));

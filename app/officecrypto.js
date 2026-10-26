@@ -129,6 +129,14 @@
   }
 
   // ---------- File structure ----------
+  const AES_KEY_BYTES = [16, 24, 32], MAX_SPIN = 1000000;
+  // The decrypted size is stored as 8 bytes before the data; it can't be larger than the data.
+  function packageSize(pkg) {
+    const dv = new DataView(pkg.buffer, pkg.byteOffset, pkg.byteLength);
+    const size = dv.getUint32(0, true);
+    if (dv.getUint32(4, true) !== 0 || size > pkg.length - 8) throw new Error('Damaged encrypted file');
+    return size;
+  }
   function streams(CFB, bytes) {
     let cfb;
     try { cfb = CFB.read(bytes, { type: 'array' }); } catch (e) { return null; }
@@ -144,11 +152,14 @@
     const xml = new TextDecoder().decode(info.subarray(8));
     const kd = n => attr(xml, 'keyData', n), ek = n => attr(xml, 'encryptedKey', n);
     const blockSize = +kd('blockSize'), keyBytes = +ek('keyBits') / 8, dataKeyBytes = +kd('keyBits') / 8;
+    // Values from the file are checked so a damaged or hostile file can't hang or exhaust the page.
+    if (blockSize !== 16 || !AES_KEY_BYTES.includes(keyBytes) || !AES_KEY_BYTES.includes(dataKeyBytes)) throw new Error('Unsupported encryption');
     if (!/AES/i.test(ek('cipherAlgorithm') || 'AES') || !/ChainingModeCBC/i.test(ek('cipherChaining') || 'ChainingModeCBC')) throw new Error('Unsupported encryption');
     const hash = await hasher(ek('hashAlgorithm')), dataHash = await hasher(kd('hashAlgorithm'));
     const salt = b64(ek('saltValue'));
     let h = await hash(concat(salt, utf16(password)));
     const spin = +ek('spinCount');
+    if (!Number.isInteger(spin) || spin < 0 || spin > MAX_SPIN) throw new Error('Unsupported encryption');
     const buf = new Uint8Array(4 + h.length);
     for (let i = 0; i < spin; i++) { buf.set(u32(i)); buf.set(h, 4); h = await hash(buf); }
     const derive = async block => fit(await hash(concat(h, Uint8Array.from(block))), keyBytes, 0x36);
@@ -159,7 +170,7 @@
     const got = await hash(input.subarray(0, salt.length));
     if (!equal(got, expected.subarray(0, got.length))) return null;
     const secret = (await dec([0x14, 0x6e, 0x0b, 0xe7, 0xab, 0xac, 0xd0, 0xd6], ek('encryptedKeyValue'))).subarray(0, dataKeyBytes);
-    const size = new DataView(pkg.buffer, pkg.byteOffset).getUint32(0, true);
+    const size = packageSize(pkg);
     const keySalt = b64(kd('saltValue')), out = new Uint8Array(size);
     for (let seg = 0, off = 8; off < pkg.length && seg * 4096 < size; seg++, off += 4096) {
       const chunk = pkg.subarray(off, Math.min(off + 4096, pkg.length));
@@ -174,7 +185,7 @@
     const dv = new DataView(info.buffer, info.byteOffset, info.byteLength);
     const headerSize = dv.getUint32(8, true), h0 = 12;
     const algId = dv.getUint32(h0 + 8, true), keyBits = dv.getUint32(h0 + 16, true);
-    if (![0x660e, 0x660f, 0x6610].includes(algId)) throw new Error('Unsupported encryption');
+    if (![0x660e, 0x660f, 0x6610].includes(algId) || !AES_KEY_BYTES.includes(keyBits / 8)) throw new Error('Unsupported encryption');
     const v = h0 + headerSize, saltSize = dv.getUint32(v, true);
     const salt = info.subarray(v + 4, v + 4 + saltSize);
     const encVerifier = info.subarray(v + 4 + saltSize, v + 20 + saltSize);
@@ -188,7 +199,7 @@
     const verifier = await aesEcbRaw(key, encVerifier);
     const verifierHash = await aesEcbRaw(key, encVerifierHash);
     if (!equal(sha1(verifier), verifierHash.subarray(0, 20))) return null;
-    const size = new DataView(pkg.buffer, pkg.byteOffset).getUint32(0, true);
+    const size = packageSize(pkg);
     const body = pkg.subarray(8, 8 + Math.ceil(size / 16) * 16);
     return (await aesEcbRaw(key, body.subarray(0, body.length - (body.length % 16)))).subarray(0, size);
   }
