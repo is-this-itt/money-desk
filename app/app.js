@@ -488,7 +488,7 @@
           <div class="drop mt" id="drop" tabindex="0" role="button" aria-label="Choose statement files">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6"><path d="M12 15V3m0 0L8 7m4-4 4 4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
             <div class="big">Drop statement files here, or click to choose</div>
-            <div class="muted small">.xlsx · .xls · .csv · .pdf (password-protected PDFs are fine)</div>
+            <div class="muted small">.xlsx · .xls · .csv · .pdf (password-protected PDF and .xlsx files are fine)</div>
           </div>
           <div id="import-status" class="mt"></div>
           <div id="import-preview"></div>
@@ -554,7 +554,21 @@
       const wb = XLSX.read(text, { type: 'string', raw: true });
       rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
     } else {
-      const wb = XLSX.read(new Uint8Array(await f.arrayBuffer()), { type: 'array', cellDates: true });
+      let bytes = new Uint8Array(await f.arrayBuffer());
+      // Banks often lock Excel statements with a password; it opens the file here and isn't kept.
+      if (MDCrypto.isEncrypted(XLSX.CFB, bytes)) {
+        if (!password) return 'password';
+        const plain = await MDCrypto.decrypt(XLSX.CFB, bytes, password);
+        if (!plain) return 'password';
+        bytes = plain;
+      }
+      let wb;
+      try { wb = XLSX.read(bytes, { type: 'array', cellDates: true }); }
+      catch (e) {
+        // Older .xls files use a different lock that Money Desk can't open.
+        if (/password/i.test(e.message)) throw new Error("this older .xls file is password-protected, which Money Desk can't open. In Excel, save it as .xlsx and import that");
+        throw e;
+      }
       // Use the sheet with the most rows.
       let best = null;
       for (const sn of wb.SheetNames) {
@@ -568,7 +582,7 @@
     return { kind: 'table', opts, rows, det, ...MD.rowsToTxns(rows, det, opts) };
   }
 
-  // Asks for a locked PDF's password in a dialog. Resolves with the parsed file once a
+  // Asks for a locked PDF or Excel file's password in a dialog. Resolves with the parsed file once a
   // password works, or null if the file is skipped. The password is never saved.
   function askPassword(f) {
     return new Promise((resolve, reject) => {
@@ -576,21 +590,23 @@
       const d = openDialog({
         title: 'Password needed', size: 'sm',
         body: `<p><b>${esc(f.name)}</b> is password-protected. Enter its password to open it. It's used only for this file and is never saved.</p>
-          <label class="fld">Statement password<input type="password" id="pdf-pass" autocomplete="off"></label>
-          <div id="pdf-err" class="mt" hidden><div class="note err">That password didn't open the file. Try again.</div></div>`,
-        foot: `<button class="btn" data-close>Skip this file</button><span class="spacer"></span><button class="btn primary" id="pdf-go">Open</button>`,
+          <label class="fld">Statement password<input type="password" id="file-pass" autocomplete="off"></label>
+          <div id="file-pass-err" class="mt" hidden><div class="note err">That password didn't open the file. Try again.</div></div>`,
+        foot: `<button class="btn" data-close>Skip this file</button><span class="spacer"></span><button class="btn primary" id="file-pass-go">Open</button>`,
         onClose: () => (failed ? reject(failed) : resolve(result)),
       });
-      const input = d.querySelector('#pdf-pass'), go = d.querySelector('#pdf-go');
+      const input = d.querySelector('#file-pass'), go = d.querySelector('#file-pass-go');
       const tryOpen = async () => {
-        if (!input.value) return;
-        go.disabled = true;
+        if (!input.value || go.disabled) return; // Enter again while unlocking does nothing
+        go.disabled = true; go.textContent = 'Opening…';
+        // Unlocking takes about a second of hashing; let the label paint first.
+        await new Promise(r => setTimeout(r, 30));
         try {
           const res = await parseFile(f, input.value);
-          if (res === 'password') { d.querySelector('#pdf-err').hidden = false; input.select(); return; }
+          if (res === 'password') { d.querySelector('#file-pass-err').hidden = false; input.select(); return; }
           result = res; d.close();
         } catch (e) { failed = e; d.close(); }
-        finally { go.disabled = false; }
+        finally { go.disabled = false; go.textContent = 'Open'; }
       };
       go.onclick = tryOpen;
       input.onkeydown = e => { if (e.key === 'Enter') tryOpen(); };
@@ -860,6 +876,7 @@
 
   // ---------- Where to get files ----------
   // Official sites only. Links open in your normal browser; Money Desk itself never goes online.
+  // Every host here must also be in $linkHosts in serve.ps1 (a test checks this).
   const GUIDE = [
     ['Bank statements', 'Download once for a long date range, as Excel (XLS/XLSX) when offered.', [
       { name: 'SBI savings', what: 'Account statement, Excel', url: 'https://www.onlinesbi.sbi/', steps: ['Log in to SBI Online (Personal Banking).', 'My Accounts & Profile → Account Statement.', 'Choose a date range of up to 6 months or a year, then download as Excel.'] },
@@ -901,7 +918,7 @@
         <div class="guide-grid">${items.map(it => `<div class="card guide-item">
           <h3>${esc(it.name)}</h3><div class="what">${esc(it.what)}</div>
           <ol>${it.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
-          ${it.url ? `<a class="btn small" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(it.url).hostname.replace(/^www\./, ''))} ${EXT_ICON}</a>` : ''}
+          ${it.url ? `<a class="btn small" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer" data-ext>${esc(new URL(it.url).hostname.replace(/^www\./, ''))} ${EXT_ICON}</a>` : ''}
         </div>`).join('')}</div>`).join('')}
       <p class="note mt">Money Desk never downloads anything itself. These are the official sites; check the address bar before you log in.</p>`;
   }
@@ -943,6 +960,15 @@
     root.querySelectorAll('[data-theme-set]').forEach(b => (b.onclick = () => {
       prefs.theme = b.dataset.themeSet; savePrefs();
       document.documentElement.dataset.theme = prefs.theme; render();
+    }));
+    // With the helper running, guide links open in your usual browser (Chrome when installed)
+    // instead of the browser that hosts the app window.
+    root.querySelectorAll('a[data-ext]').forEach(a => (a.onclick = a.onauxclick = e => {
+      if (!fileMode || e.button > 1) return;
+      e.preventDefault();
+      fetch('/api/open', { method: 'POST', headers: { 'X-Money-Desk': HELPER_KEY, 'Content-Type': 'text/plain' }, body: a.href })
+        .then(r => { if (!r.ok) throw new Error(r.status); })
+        .catch(() => window.open(a.href, '_blank', 'noopener,noreferrer'));
     }));
     root.querySelectorAll('[data-jump]').forEach(b => (b.onclick = () => { const t = document.getElementById(b.dataset.jump); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
     root.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => { txFilter.category = b.dataset.cat; txFilter.q = ''; setView('transactions'); }));

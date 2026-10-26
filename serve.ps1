@@ -15,7 +15,7 @@ $keepBackups = 30
 $port = 8789
 $prefix = "http://localhost:$port/"
 $origin = "http://localhost:$port"
-$version = '6'
+$version = '7'
 # Safety net if the window never says goodbye (for example, the browser crashed).
 $idleLimit = [TimeSpan]::FromMinutes(10)
 $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -48,6 +48,39 @@ function Open-Window([string]$key) {
     if ($exe) { Start-Process -FilePath $exe -ArgumentList "--app=$url", '--window-size=1440,920' }
     else { Start-Process $url }
   } catch { }
+}
+
+# Sites the download guide links to. Only these can be opened through /api/open.
+$linkHosts = @(
+  'www.onlinesbi.sbi', 'netbanking.kotak.com', 'netbanking.hdfcbank.com', 'www.icicibank.com', 'www.sbicard.com',
+  'www.camsonline.com', 'mfs.kfintech.com', 'www.amfiindia.com', 'nsdl.com', 'groww.in', 'www.wealthy.in',
+  'www.cibil.com', 'www.experian.in', 'www.bhimupi.org.in', 'upihelp.npci.org.in'
+)
+
+# Opens a guide link in your usual browser: Chrome when installed, otherwise the Windows default.
+# The app window itself stays in its own browser window; only https links to the sites above open.
+function Open-Link($req, $res) {
+  $o = $req.Headers['Origin']
+  if ($req.HttpMethod -ne 'POST' -or ($o -and $o -ne $origin) -or -not (Test-Key $req)) { $res.StatusCode = 403; return }
+  if ($req.ContentLength64 -le 0 -or $req.ContentLength64 -gt 2048) { $res.StatusCode = 413; return }
+  $text = (New-Object System.IO.StreamReader($req.InputStream, $utf8)).ReadToEnd()
+  $uri = $null
+  if (-not [Uri]::TryCreate($text.Trim(), [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https' -or
+      $uri.UserInfo -or -not $uri.IsDefaultPort -or $linkHosts -notcontains $uri.Host.ToLower()) { $res.StatusCode = 400; return }
+  $chrome = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+  ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+  # AbsoluteUri is fully escaped (no spaces or quotes), so it reaches the browser as one argument.
+  try {
+    if ($chrome) { Start-Process -FilePath $chrome -ArgumentList $uri.AbsoluteUri }
+    else { Start-Process $uri.AbsoluteUri }
+    $res.StatusCode = 204
+  } catch {
+    # The page then opens the link itself.
+    $res.StatusCode = 502
+  }
 }
 
 function Send-Text($res, [int]$status, [string]$text, [string]$type) {
@@ -175,6 +208,7 @@ try {
         continue
       }
       if ($path -eq '/api/data') { Handle-Data $req $res; continue }
+      if ($path -eq '/api/open') { Open-Link $req $res; continue }
       if ($req.HttpMethod -ne 'GET') { $res.StatusCode = 405; continue }
       $rel = $path.TrimStart('/') -replace '/', [IO.Path]::DirectorySeparatorChar
       $file = [IO.Path]::GetFullPath((Join-Path $root $rel))
