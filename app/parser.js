@@ -176,7 +176,8 @@
     // The payer's name starts right after a cut, so its first letter stands alone ("A XIS MUTUAL").
     if (m) return { name: m[1].replace(/^([a-z]) (?=[a-z]{2})/i, '$1').trim(), handle: '', upi: false };
     m = /^(?:WDL|DEP) TFR (?:INB|CMP|SBIY\S*)\s+(.*?)(?:\s+(?:X{4,}\d{4}|\d{8,}))?\s+AT\s+\d+\b/i.exec(d);
-    if (m) { const of = m[1].split(/\s+OF\s+/i); return { name: of[of.length - 1].trim(), handle: '', upi: false }; }
+    // YONO and CMP lines end "<note> 0 <reference> OF <payee>"; other lines are the payee itself.
+    if (m) { const of = /\s0\s+(?:X+\d{4}|\d{6,})\s+OF\s+(.+)$/i.exec(m[1]); return { name: (of ? of[1] : m[1]).trim(), handle: '', upi: false }; }
     m = /^DEBIT ACHDr \S+ \S+ (.+)$/i.exec(d);
     if (m) return { name: m[1].trim(), handle: '', upi: false };
     return null;
@@ -189,6 +190,7 @@
     if (sbi) {
       const w = sbi.name;
       // A UPI payee can be named by a phone number, which the statement masks.
+      // The person check uses the whole name; only the shown name is cut to 40 characters.
       if (/[a-z]{2,}/i.test(w) && !/x{4,}/i.test(w)) return { name: titleCase(w.slice(0, 40)), person: sbi.upi && !/[0-9]/.test(w) && w.split(' ').length <= 4 && !looksBusiness(w) };
       if (sbi.upi) return { name: 'UPI payment', person: true };
     }

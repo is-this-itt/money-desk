@@ -257,6 +257,11 @@ test('SBI 2026 descriptions: words cut by the statement still give the payee and
   // A long name is checked in full, not after it is shortened for display.
   const long = MD.extractMerchant('WDL TFR UPI/DR/612345678910/ANNAPURNA SRINIVASA RAGHAVENDRA TRADERS/YESB/q 1234/UPI' + tail);
   assert.strictEqual(long.person, false);
+  assert.deepStrictEqual(cat('WDL TFR INB HOUSE OF FASHION 12345672090 AT 01234 TESTPUR', -2500), ['House Of Fashion', 'Other']);
+  assert.deepStrictEqual(cat('WDL TFR SBIY1234567890123456789/P/Bill Payment 0 12349104 OF BANK OF TESTPUR AT 01234 TESTPUR', -500), ['Bank Of Testpur', 'Other']);
+  // The cut words still match other banks' full words.
+  assert.deepStrictEqual(cat('POS TANISHQ JEWELLERY BANGALORE', -15000), ['Tanishq Jewellery', 'Shopping']);
+  assert.deepStrictEqual(cat('ACH D- INDIAN CLEARING CORP-ABC123', -5000)[1], 'Investments');
   // Lines from other banks are not read as SBI lines.
   assert.strictEqual(MD.sbiParts('TO TRANSFER-UPI/DR/627512345678/SWIGGY/YESB/swiggy@ybl/Payment'), null);
   assert.strictEqual(MD.sbiParts('UPI-RAHUL SHARMA-rahul@okhdfcbank-HDFC0001234-612345678901-UPI'), null);
