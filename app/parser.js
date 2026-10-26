@@ -293,8 +293,9 @@
   function redactDesc(d) {
     return clean(d)
       .replace(/\b\d{4,6}[xX*]{4,}(\d{4})\b/g, 'XX$1')
-      // Full card numbers written in groups (4-4-4-4, Amex 4-6-5, Diners 4-6-4): 13 to 19 digits.
-      .replace(/\b\d{4,6}(?:[ -]\d{4,6}){2,4}\b/g, n => { const d = n.replace(/\D/g, ''); return d.length >= 13 && d.length <= 19 ? 'XX' + d.slice(-4) : n; })
+      // Numbers written in groups: card numbers (4-4-4-4, Amex 4-6-5, Diners 4-6-4) become XX1234,
+      // phone and account numbers ("98765 43210") keep only their last 4 digits.
+      .replace(/\b\d{4,6}(?:[ -]\d{4,6})+\b/g, n => { const d = n.replace(/\D/g, ''); return d.length >= 13 && d.length <= 19 ? 'XX' + d.slice(-4) : 'X'.repeat(d.length - 4) + d.slice(-4); })
       .replace(/([\w.+-]+)@([a-z][a-z0-9.]*)/gi, (m, user, handle) => (user.length > 2 ? user.slice(0, 2) + '***' : '***') + '@' + handle)
       .replace(/\d{6,}/g, n => 'X'.repeat(n.length - 4) + n.slice(-4))
       .replace(/\s+/g, ' ').trim();
@@ -631,8 +632,8 @@
   }
 
   // Saved lines go through redactDesc, which leaves at most 4 digits of a number and 2 letters
-  // of a UPI ID; anything longer means a number or ID got through unmasked. Numbers written in
-  // groups ("98765 43210") slip past redactDesc, so they count too.
+  // of a UPI ID; anything longer, or a number still written in groups, means a number or ID got
+  // through unmasked (for example a line saved by an older version).
   const UNMASKED_DESC = /\d{6,}|\b\d{4,6}(?:[ -]\d{4,6})+\b|[\w.+-]{3,}@[a-z]/i;
   const UNMASKED_MERCHANT = /\d{5,}|@/;
 
@@ -649,8 +650,10 @@
       const merchant = String(t.merchant || '');
       const unmasked = UNMASKED_DESC.test(desc) || UNMASKED_MERCHANT.test(merchant);
       const unread = t.category === 'Other' || t.category === 'Other income';
-      const sh = unmasked || unread ? lineShape(desc) : '';
-      if (unmasked) { a.unmasked++; a.unmaskedShapes.set(sh, (a.unmaskedShapes.get(sh) || 0) + 1); }
+      const sh = !(unmasked || unread) ? '' : clean(desc) ? lineShape(desc) : '(no description)';
+      // When only the merchant name trips the check, the line's layout would point at the wrong thing.
+      const ush = UNMASKED_DESC.test(desc) ? sh : '(merchant name)';
+      if (unmasked) { a.unmasked++; a.unmaskedShapes.set(ush, (a.unmaskedShapes.get(ush) || 0) + 1); }
       if (unread) { a.unread++; a.shapes.set(sh, (a.shapes.get(sh) || 0) + 1); }
     }
     return [...by.values()].sort((x, y) => String(x.account).localeCompare(String(y.account))).map(a => ({
@@ -658,8 +661,20 @@
     }));
   }
 
-  const PARSER_VERSION = 6;
-  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, lineShape, readingReport, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
+  // The report to copy: accounts by number only. kindOf(account) gives 'card' or 'bank'.
+  function readingReportText(rep, kindOf = () => 'bank') {
+    const lines = ['Money Desk reading check: line layouts and counts only (no names, numbers, amounts, dates or account names)'];
+    rep.forEach((a, i) => {
+      const kind = kindOf(a.account) === 'card' ? 'credit card' : 'bank account';
+      lines.push('', `Account ${i + 1} (${kind}): ${a.rows} rows, ${a.unread} uncategorised (Other), ${a.unmasked} may hold an unmasked number`);
+      if (a.shapes.length) lines.push('  Uncategorised layouts:', ...a.shapes.map(s => `    ${s.count}x  ${s.shape}`));
+      if (a.unmaskedShapes.length) lines.push('  Layouts that may be unmasked:', ...a.unmaskedShapes.map(s => `    ${s.count}x  ${s.shape}`));
+    });
+    return lines.join('\n');
+  }
+
+  const PARSER_VERSION = 7;
+  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);

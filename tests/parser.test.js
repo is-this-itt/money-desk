@@ -81,7 +81,13 @@ test('Card numbers written in groups are masked', () => {
   assert.strictEqual(MD.redactDesc('AMEX 3782 822463 10005'), 'AMEX XX0005');
   assert.strictEqual(MD.redactDesc('TXN 25-10-2026 SWIGGY'), 'TXN 25-10-2026 SWIGGY');
   assert.strictEqual(MD.redactDesc('DINERS 3056 930902 5904'), 'DINERS XX5904');
-  assert.strictEqual(MD.redactDesc('REF 2026 1234 5678'), 'REF 2026 1234 5678');
+  // Phone and account numbers written in groups keep only their last 4 digits.
+  assert.strictEqual(MD.redactDesc('REF 2026 1234 5678'), 'REF XXXXXXXX5678');
+  assert.strictEqual(MD.redactDesc('UPI/CALL 98765 43210/UPI'), 'UPI/CALL XXXXXX3210/UPI');
+  assert.strictEqual(MD.redactDesc('MOB +91-98765-43210 PAID'), 'MOB +91-XXXXXX3210 PAID');
+  assert.strictEqual(MD.redactDesc('A/C 1234 5678 9012'), 'A/C XXXXXXXX9012');
+  assert.strictEqual(MD.redactDesc('UPI 1500 OCT 2026'), 'UPI 1500 OCT 2026');
+  assert.strictEqual(MD.redactDesc(MD.redactDesc('UPI/CALL 98765 43210/UPI')), 'UPI/CALL XXXXXX3210/UPI');
 });
 
 test('Saved rules win, and a __proto__ merchant cannot hijack categorisation', () => {
@@ -309,11 +315,19 @@ test('reading check: layouts keep only bank words, counts flag unread and unmask
   const rep = MD.readingReport(txns);
   assert.deepStrictEqual(rep.map(a => [a.account, a.rows, a.unread, a.unmasked]), [['A', 4, 1, 3], ['B', 4, 3, 0]]);
   assert.deepStrictEqual(rep[1].shapes, [{ shape: 'UPI/x9/a', count: 2 }, { shape: 'NEFT/a', count: 1 }]);
-  assert.deepStrictEqual(rep[0].unmaskedShapes, [{ shape: 'UPI/x9', count: 2 }, { shape: 'a 9 a@a', count: 1 }]);
+  assert.deepStrictEqual(rep[0].unmaskedShapes, [{ shape: '(merchant name)', count: 2 }, { shape: 'a 9 a@a', count: 1 }]);
+  assert.deepStrictEqual(rep[0].shapes, [{ shape: '(no description)', count: 1 }]);
   assert.ok(!/Shop|Acme|Rahul|rahul|123456789/.test(JSON.stringify(rep.map(a => [a.shapes, a.unmaskedShapes]))));
   assert.strictEqual(MD.readingReport(txns, 1)[1].shapes.length, 1);
   assert.deepStrictEqual(MD.readingReport([]), []);
-  // A phone number written in two groups passes masking, so the check flags it.
-  assert.strictEqual(MD.readingReport([{ account: 'C', desc: MD.redactDesc('UPI/CALL 98765 43210/UPI'), merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 1);
+  // A number in groups is masked now, but a line saved before that is still flagged.
+  assert.strictEqual(MD.readingReport([{ account: 'C', desc: MD.redactDesc('UPI/CALL 98765 43210/UPI'), merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 0);
+  assert.strictEqual(MD.readingReport([{ account: 'C', desc: 'UPI/CALL 98765 43210/UPI', merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 1);
+  const text = MD.readingReportText(rep, acc => acc === 'B' ? 'card' : 'bank');
+  assert.ok(text.includes('Account 1 (bank account): 4 rows, 1 uncategorised (Other), 3 may hold an unmasked number'));
+  assert.ok(text.includes('Account 2 (credit card): 4 rows, 3 uncategorised (Other), 0 may hold an unmasked number'));
+  assert.ok(text.includes('    2x  (merchant name)') && text.includes('    1x  (no description)'));
+  assert.ok(!/Shop|Acme|Rahul|rahul|123456789|\bA\b|\bB\b/.test(text.split('\n').slice(1).join('\n')));
+  assert.strictEqual(MD.readingReportText([]), text.split('\n')[0]);
   assert.strictEqual(MD.lineShape('BILL PAYMENT'), 'a PAYMENT');
 });
