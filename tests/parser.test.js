@@ -372,3 +372,20 @@ test('reading check: layouts keep only bank words, counts flag unread and unmask
   assert.strictEqual(MD.readingReportText([]), text.split('\n')[0]);
   assert.strictEqual(MD.lineShape('BILL PAYMENT'), 'a PAYMENT');
 });
+
+test('SBI UPI reversals are refunds', () => {
+  const t = MD.makeTxn({ date: '2026-05-01', desc: 'DEP TFR UPI/REV/612345678901 00000012345678901 AT 04321 TESTPUR', amount: 250, account: 'S', accountKind: 'bank', rules: {} });
+  assert.strictEqual(t.merchant, 'UPI Reversal');
+  assert.strictEqual(t.category, 'Refunds & cashback');
+  assert.ok(!/612345678901/.test(t.desc));
+  // "SAL" counts only as a word of its own.
+  assert.strictEqual(MD.categorize('NEFT/SAL/ACME', 'Acme', 50000, {}, 'bank'), 'Salary');
+  assert.strictEqual(MD.categorize('NEFT-SAL-OCT', 'Acme', 50000, {}, 'bank'), 'Salary');
+  assert.strictEqual(MD.categorize('UPI/CR/Universal Traders', 'Universal Traders', 500, {}, 'bank'), 'Other income');
+  assert.strictEqual(MD.categorize('NEFT*SAL*OCT', 'Acme', 50000, {}, 'bank'), 'Salary');
+  assert.strictEqual(MD.categorize('IMPS PAYMENT REVERSAL', 'Imps Payment Reversal', 500, {}, 'bank'), 'Refunds & cashback');
+  assert.strictEqual(MD.categorize('UPI/CR/Nasal Care', 'Nasal Care', 500, {}, 'bank'), 'Other income');
+  // The saved, masked line reads the same way when the app relabels it on open.
+  const again = MD.makeTxn({ date: '2026-05-01', desc: t.desc, amount: 250, account: 'S', accountKind: 'bank', rules: {} });
+  assert.deepStrictEqual([again.merchant, again.category], ['UPI Reversal', 'Refunds & cashback']);
+});
