@@ -6,16 +6,20 @@
 
   // ---------- Categories ----------
   // kind: spend (counts as spending), income, invest, transfer (ignored in totals)
+  // Some words are cut on purpose to match SBI's cut-up lines, and still match the full text:
+  // 'mutual fun', 'indian clearin' (ICCL, which collects SIPs), 'interes t credit', 'jewell'.
+  // 'rzpx pvt ltd pa' is how SBI prints RazorpayX Payroll, which pays salaries for many
+  // employers; anything else paid through it can be fixed with a rule.
   const CATEGORIES = [
     { name: 'Groceries', kind: 'spend', words: ['bigbasket', 'big basket', 'blinkit', 'grofers', 'zepto', 'dmart', 'd mart', 'avenue supermarts', 'instamart', 'jiomart', 'reliance fresh', 'reliance smart', 'more retail', 'natures basket', 'ratnadeep', 'spencer', 'dunzo', 'supermarket', 'kirana', 'grocery'] },
     { name: 'Food & dining', kind: 'spend', words: ['swiggy', 'zomato', 'eatsure', 'domino', 'mcdonald', 'kfc', 'pizza', 'starbucks', 'cafe', 'coffee', 'restaurant', 'burger', 'haldiram', 'chaayos', 'blue tokai', 'subway', 'barbeque', 'biryani', 'bakery', 'dhaba', 'food'] },
     { name: 'Bills & utilities', kind: 'spend', words: ['electricity', 'bescom', 'msedcl', 'mahavitaran', 'tata power', 'adani elec', 'torrent power', 'tneb', 'airtel', 'jio', 'vodafone', 'vodaidea', 'bsnl', 'act fibernet', 'broadband', 'hathway', 'gas', 'water bill', 'recharge', 'dth', 'tata play', 'bill payment', 'bbps', 'utility', 'utilities'] },
-    { name: 'Shopping', kind: 'spend', words: ['amazon', 'amzn', 'flipkart', 'myntra', 'ajio', 'meesho', 'nykaa', 'tata cliq', 'croma', 'reliance digital', 'decathlon', 'ikea', 'lenskart', 'firstcry', 'snapdeal', 'pantaloons', 'westside', 'zudio', 'h&m', 'uniqlo', 'lifestyle', 'shoppers stop'] },
+    { name: 'Shopping', kind: 'spend', words: ['amazon', 'amzn', 'flipkart', 'myntra', 'ajio', 'meesho', 'nykaa', 'tata cliq', 'croma', 'reliance digital', 'decathlon', 'ikea', 'lenskart', 'jewell', 'firstcry', 'snapdeal', 'pantaloons', 'westside', 'zudio', 'h&m', 'uniqlo', 'lifestyle', 'shoppers stop'] },
     { name: 'Transport', kind: 'spend', words: ['uber', 'ola ', 'olacabs', 'ani technologies', 'rapido', 'metro', 'fastag', 'parking', 'namma yatri', 'blusmart', 'toll'] },
     { name: 'Travel', kind: 'spend', words: ['irctc', 'redbus', 'indigo', 'interglobe', 'air india', 'vistara', 'akasa', 'spicejet', 'makemytrip', 'make my trip', 'goibibo', 'cleartrip', 'yatra', 'ixigo', 'booking.com', 'airbnb', 'oyo', 'agoda', 'hotel'] },
     { name: 'Fuel', kind: 'spend', words: ['petrol', 'fuel', 'hpcl', 'bpcl', 'indian oil', 'iocl', 'shell', 'filling station', 'service station'] },
     { name: 'Subscriptions', kind: 'spend', words: ['netflix', 'spotify', 'prime video', 'amazon prime', 'primevideo', 'hotstar', 'disney', 'youtube', 'google play', 'googleplay', 'apple.com', 'itunes', 'openai', 'chatgpt', 'anthropic', 'claude.ai', 'notion', 'linkedin', 'zee5', 'sonyliv', 'jiocinema', 'audible', 'kindle', 'icloud', 'microsoft', 'adobe', 'github', 'canva', 'dropbox'] },
-    { name: 'Health & fitness', kind: 'spend', words: ['pharmacy', 'apollo', 'medplus', '1mg', 'pharmeasy', 'netmeds', 'hospital', 'clinic', 'diagnostic', 'practo', 'cult.fit', 'cultfit', 'curefit', 'gym', 'fitness', 'medical', 'chemist', 'dental', 'lab '] },
+    { name: 'Health & fitness', kind: 'spend', words: ['pharmacy', 'apollo', 'medplus', '1mg', 'pharmeasy', 'netmeds', 'hospital', 'clinic', 'diagnostic', 'practo', 'cult.fit', 'cultfit', 'curefit', 'gym', 'fitness', 'medical', 'chemist', 'dental', 'lab ', 'thyrocare'] },
     { name: 'Rent & housing', kind: 'spend', words: ['rent', 'furlenco', 'rentomojo', 'nobroker', 'maintenance', 'society', 'housing', 'landlord'] },
     { name: 'Entertainment', kind: 'spend', words: ['bookmyshow', 'pvr', 'inox', 'district', 'cinepolis', 'steam', 'playstation', 'xbox', 'gaming'] },
     { name: 'Education', kind: 'spend', words: ['udemy', 'coursera', 'school', 'college', 'university', 'tuition', 'byju', 'unacademy', 'upgrad', 'exam fee'] },
@@ -23,10 +27,10 @@
     { name: 'EMI & loans', kind: 'spend', words: [' emi', 'emi ', 'loan', 'bajaj finance', 'bajaj fin', 'home credit', 'nach-', 'lazypay', 'simpl', 'slice'] },
     { name: 'Cash withdrawal', kind: 'spend', words: ['atm', 'cash wdl', 'cash withdrawal', 'nwd', 'atw', 'cwdr'] },
     { name: 'Fees & interest', kind: 'spend', words: ['annual fee', 'late fee', 'late payment', 'finance charge', 'interest charged', 'interest on', 'overlimit', 'charges', 'sms alert', 'membership fee', 'joining fee', 'renewal fee', 'gst', 'igst', 'cgst', 'sgst', 'penalty', 'surcharge', 'markup'] },
-    { name: 'Investments', kind: 'invest', words: ['groww', 'nextbillion', 'zerodha', 'upstox', 'wealthy', 'kuvera', 'mutual fund', 'mutualfund', ' mf ', 'sip ', 'bse ltd', 'bsestarmf', 'nse clearing', 'indian clearing', 'iccl', 'cams', 'kfin', 'ppf', 'nps', 'smallcase', 'angel one', 'angel broking', 'dhan', 'paytm money', 'icici direct', 'hdfc securities', 'fixed deposit', ' fd ', 'recurring deposit', 'sgb'] },
-    { name: 'Card payments & transfers', kind: 'transfer', words: ['credit card payment', 'cc payment', 'card payment', 'payment received', 'payment - thank', 'thank you', 'cred club', 'dreamplug', 'cred ', 'autopay', 'self transfer', ' self ', 'own account', 'sweep', 'cardbill', 'card bill', 'billdesk'] },
-    { name: 'Salary', kind: 'income', words: ['salary', 'sal ', 'payroll', 'sal-', 'sal/'] },
-    { name: 'Interest & dividends', kind: 'income', words: ['interest credit', 'int.pd', 'int pd', 'int.coll', 'interest paid', 'sb interest', 'dividend', 'div '] },
+    { name: 'Investments', kind: 'invest', words: ['groww', 'nextbillion', 'zerodha', 'upstox', 'wealthy', 'kuvera', 'mutual fun', 'mutualfund', ' mf ', 'sip ', 'bse ltd', 'bsestarmf', 'nse clearing', 'indian clearin', 'iccl', 'cams', 'kfin', 'ppf', 'nps', 'smallcase', 'angel one', 'angel broking', 'dhan', 'paytm money', 'icici direct', 'hdfc securities', 'fixed deposit', ' fd ', 'recurring deposit', 'sgb', 'safegold', 'safe gold'] },
+    { name: 'Card payments & transfers', kind: 'transfer', words: ['credit card payment', 'cc payment', 'card payment', 'payment received', 'payment - thank', 'thank you', 'cred club', 'dreamplug', 'cred ', 'autopay', 'self transfer', ' self ', 'own account', 'sweep', 'cardbill', 'card bill', 'billdesk', 'sbicardp'] },
+    { name: 'Salary', kind: 'income', words: ['salary', 'sal ', 'payroll', 'sal-', 'sal/', 'rzpx pvt ltd pa'] },
+    { name: 'Interest & dividends', kind: 'income', words: ['interest credit', 'interes t credit', 'int.pd', 'int pd', 'int.coll', 'interest paid', 'sb interest', 'dividend', 'div '] },
     { name: 'Refunds & cashback', kind: 'spend', words: ['refund', 'reversal', 'cashback', 'cash back', 'rev-', 'chargeback'] },
     { name: 'People (UPI)', kind: 'spend', words: [] },
     { name: 'Other', kind: 'spend', words: [] },
@@ -160,9 +164,36 @@
     return s.toLowerCase().replace(/\b([a-z])/g, (m, c) => c.toUpperCase()).replace(/\b(Upi|Atm|Emi|Sip|Lic|Neft|Imps|Gst|Bse|Nse|Hdfc|Sbi|Icici|Irctc|Kfc|Pvr)\b/g, w => w.toUpperCase());
   }
 
+  // SBI statements cut descriptions into fixed-width pieces joined by spaces, so words get split
+  // ("k otak811pa", "C OGNAIZE"). Read the payee from the fields SBI always puts in the same place.
+  // Returns { name, handle, upi } (handle: the UPI ID's first part, spaces removed) or null.
+  function sbiParts(desc) {
+    // Real lines are under 200 characters; the cap keeps the patterns below fast on odd input.
+    const d = clean(desc).slice(0, 300);
+    let m = /^(?:WDL|DEP) TFR UPI\/(?:DR|CR)\/[^/]*\/([^/]*)\/[^/]*\/([^/]*)/i.exec(d);
+    if (m) return { name: m[1].trim(), handle: m[2].replace(/\s+/g, '').toLowerCase(), upi: true };
+    m = /^DEP TFR (?:NEFT|IMPS|RTGS)\*[^*]*\*[^*]*\*(.*?)(?:\s+(?:X{4,}\d{4}|\d{8,}))?(?:\s+AT\s+\d+\b.*)?$/i.exec(d);
+    // The payer's name starts right after a cut, so its first letter stands alone ("A XIS MUTUAL").
+    if (m) return { name: m[1].replace(/^([a-z]) (?=[a-z]{2})/i, '$1').trim(), handle: '', upi: false };
+    m = /^(?:WDL|DEP) TFR (?:INB|CMP|SBIY\S*)\s+(.*?)(?:\s+(?:X{4,}\d{4}|\d{8,}))?\s+AT\s+\d+\b/i.exec(d);
+    // YONO and CMP lines end "<note> 0 <reference> OF <payee>"; other lines are the payee itself.
+    if (m) { const of = /\s0\s+(?:X+\d{4}|\d{6,})\s+OF\s+(.+)$/i.exec(m[1]); return { name: (of ? of[1] : m[1]).trim(), handle: '', upi: false }; }
+    m = /^DEBIT ACHDr \S+ \S+ (.+)$/i.exec(d);
+    if (m) return { name: m[1].trim(), handle: '', upi: false };
+    return null;
+  }
+
   function extractMerchant(desc) {
     const d = clean(desc);
     const low = d.toLowerCase();
+    const sbi = sbiParts(d);
+    if (sbi) {
+      const w = sbi.name;
+      // A UPI payee can be named by a phone number, which the statement masks.
+      // The person check uses the whole name; only the shown name is cut to 40 characters.
+      if (/[a-z]{2,}/i.test(w) && !/x{4,}/i.test(w)) return { name: titleCase(w.slice(0, 40)), person: sbi.upi && !/[0-9]/.test(w) && w.split(' ').length <= 4 && !looksBusiness(w) };
+      if (sbi.upi) return { name: 'UPI payment', person: true };
+    }
     if (/(^|[\s/:-])upi([\s/:-]|$)/i.test(d) || /@[a-z]{2,}/i.test(d) || /\b(neft|imps|rtgs)\b/i.test(d)) {
       const tokens = d.split(/[\/:|*]|\s-\s|-(?=\S)/).map(t => t.trim()).filter(Boolean);
       let vpa = '';
@@ -204,7 +235,10 @@
   function categorize(desc, merchant, amount, rules, accountKind) {
     const key = merchantKey(merchant);
     if (rules && Object.prototype.hasOwnProperty.call(rules, key)) return rules[key];
-    const hay = ' ' + clean(desc).toLowerCase() + ' ' + key + ' ';
+    const sbi = sbiParts(desc);
+    // "P/Bill Payment" is SBI's label for any payment made in YONO, not only bills.
+    const d = sbi ? clean(desc).replace(/\/P\/Bill Payment\b/i, ' ') : clean(desc);
+    const hay = ' ' + d.toLowerCase() + ' ' + key + ' ' + (sbi ? sbi.handle + ' ' : '');
     // Card statement credits that are bill payments.
     if (accountKind === 'card' && amount > 0 && /(payment|thank you|neft|imps|upi|autopay|bbps|received)/.test(hay) && !/(refund|reversal|cashback)/.test(hay)) return 'Card payments & transfers';
     for (const c of CATEGORIES) {
@@ -550,8 +584,8 @@
   // Two entries are the same service when type, name, provider, last 4 digits, amount and day all match.
   const serviceKey = v => [v.type, merchantKey(v.name), merchantKey(v.provider || ''), v.last4, v.amount == null || v.amount === '' ? '' : Number(v.amount), v.day || ''].join('|');
 
-  const PARSER_VERSION = 4;
-  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
+  const PARSER_VERSION = 5;
+  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);
