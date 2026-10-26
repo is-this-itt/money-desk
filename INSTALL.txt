@@ -13,7 +13,8 @@ Close the window when you're done. The background helper stops with it.
 Privacy
 - Runs only on this laptop. The page is locked so it cannot send data
   anywhere, and nothing is uploaded.
-- Your data is saved in data\money-desk.json in this folder, with a daily
-  copy in data\backups (last 30 days). Don't delete the data folder.
+- Your data is saved in data\money-desk.json in this folder, with copies in
+  data\backups: one per day for 30 days, and one from each of the last 20
+  times you opened Money Desk. Don't delete the data folder.
   Use Accounts & data > Download backup to keep a copy elsewhere too.
 - Statement passwords are used only to open the file and are never saved.
