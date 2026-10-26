@@ -597,7 +597,7 @@
       });
       const input = d.querySelector('#file-pass'), go = d.querySelector('#file-pass-go');
       const tryOpen = async () => {
-        if (!input.value) return;
+        if (!input.value || go.disabled) return; // Enter again while unlocking does nothing
         go.disabled = true; go.textContent = 'Opening…';
         // Unlocking takes about a second of hashing; let the label paint first.
         await new Promise(r => setTimeout(r, 30));

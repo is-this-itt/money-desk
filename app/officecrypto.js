@@ -97,7 +97,7 @@
     return out;
   }
 
-  // Hash names as Office writes them. SHA-256 and SHA-384 use Web Crypto (slower, but rare).
+  // Hash names as Office writes them. SHA-256 and SHA-384 use Web Crypto, which is slower.
   const HASHES = {
     'SHA1': [sha1, 'SHA-1'], 'SHA-1': [sha1, 'SHA-1'],
     'SHA512': [sha512, 'SHA-512'], 'SHA-512': [sha512, 'SHA-512'],
