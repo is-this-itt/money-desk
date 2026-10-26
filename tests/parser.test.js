@@ -382,4 +382,10 @@ test('SBI UPI reversals are refunds', () => {
   assert.strictEqual(MD.categorize('NEFT/SAL/ACME', 'Acme', 50000, {}, 'bank'), 'Salary');
   assert.strictEqual(MD.categorize('NEFT-SAL-OCT', 'Acme', 50000, {}, 'bank'), 'Salary');
   assert.strictEqual(MD.categorize('UPI/CR/Universal Traders', 'Universal Traders', 500, {}, 'bank'), 'Other income');
+  assert.strictEqual(MD.categorize('NEFT*SAL*OCT', 'Acme', 50000, {}, 'bank'), 'Salary');
+  assert.strictEqual(MD.categorize('IMPS PAYMENT REVERSAL', 'Imps Payment Reversal', 500, {}, 'bank'), 'Refunds & cashback');
+  assert.strictEqual(MD.categorize('UPI/CR/Nasal Care', 'Nasal Care', 500, {}, 'bank'), 'Other income');
+  // The saved, masked line reads the same way when the app relabels it on open.
+  const again = MD.makeTxn({ date: '2026-05-01', desc: t.desc, amount: 250, account: 'S', accountKind: 'bank', rules: {} });
+  assert.deepStrictEqual([again.merchant, again.category], ['UPI Reversal', 'Refunds & cashback']);
 });

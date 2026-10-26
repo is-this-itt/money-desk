@@ -31,7 +31,7 @@
     { name: 'Card payments & transfers', kind: 'transfer', words: ['credit card payment', 'cc payment', 'card payment', 'payment received', 'payment - thank', 'thank you', 'cred club', 'dreamplug', 'cred ', 'autopay', 'self transfer', ' self ', 'own account', 'ac xfr from gl', 'sweep', 'cardbill', 'card bill', 'billdesk', 'sbicardp'] },
     { name: 'Salary', kind: 'income', words: ['salary', 'payroll', 'rzpx pvt ltd pa',
       // "SAL" only as a word of its own, so names ending in "sal" ("Reversal") don't match.
-      ...[' ', '/', '-', '*'].flatMap(a => [' ', '/', '-'].map(b => a + 'sal' + b))] },
+      ...[' ', '/', '-', '*'].flatMap(a => [' ', '/', '-', '*'].map(b => a + 'sal' + b))] },
     { name: 'Interest & dividends', kind: 'income', words: ['interest credit', 'interes t credit', 'int.pd', 'int pd', 'int.coll', 'interest paid', 'sb interest', 'dividend', 'div '] },
     { name: 'Refunds & cashback', kind: 'spend', words: ['refund', 'reversal', 'cashback', 'cash back', 'rev-', 'upi/rev/', 'chargeback'] },
     { name: 'People (UPI)', kind: 'spend', words: [] },
@@ -175,7 +175,7 @@
     let m = /^(?:WDL|DEP) TFR UPI\/(?:DR|CR)\/[^/]*\/([^/]*)\/[^/]*\/([^/]*)/i.exec(d);
     if (m) return { name: m[1].trim(), handle: m[2].replace(/\s+/g, '').toLowerCase(), upi: true };
     // A failed UPI payment comes back as "DEP TFR UPI/REV/<ref> ..." with no payee.
-    if (/^(?:WDL|DEP) TFR UPI\/REV\//i.test(d)) return { name: 'UPI reversal', handle: '', upi: false };
+    if (/^DEP TFR UPI\/REV\//i.test(d)) return { name: 'UPI Reversal', handle: '', upi: false };
     m = /^DEP TFR (?:NEFT|IMPS|RTGS)\*[^*]*\*[^*]*\*(.*?)(?:\s+(?:X{4,}\d{4}|\d{8,}))?(?:\s+AT\s+\d+\b.*)?$/i.exec(d);
     // The payer's name starts right after a cut, so its first letter stands alone ("A XIS MUTUAL").
     if (m) return { name: m[1].replace(/^([a-z]) (?=[a-z]{2})/i, '$1').trim(), handle: '', upi: false };
