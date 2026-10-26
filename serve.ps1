@@ -15,7 +15,7 @@ $keepBackups = 30
 $port = 8789
 $prefix = "http://localhost:$port/"
 $origin = "http://localhost:$port"
-$version = '6'
+$version = '7'
 # Safety net if the window never says goodbye (for example, the browser crashed).
 $idleLimit = [TimeSpan]::FromMinutes(10)
 $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -36,12 +36,14 @@ function New-Key {
 function Open-Window([string]$key) {
   # The key goes after #, so the browser keeps it in the window and never sends it in a URL.
   $url = "$prefix#k=$key"
+  # Chrome first when it's installed, so links from the app (such as the download guide) open as
+  # tabs in your usual Chrome with your sign-ins. Edge is the fallback that every Windows PC has.
   $browsers = @(
-    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
-    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
     "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
     "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
-    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
   )
   $exe = $browsers | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
   try {

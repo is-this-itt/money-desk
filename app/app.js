@@ -488,7 +488,7 @@
           <div class="drop mt" id="drop" tabindex="0" role="button" aria-label="Choose statement files">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6"><path d="M12 15V3m0 0L8 7m4-4 4 4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
             <div class="big">Drop statement files here, or click to choose</div>
-            <div class="muted small">.xlsx · .xls · .csv · .pdf (password-protected PDFs are fine)</div>
+            <div class="muted small">.xlsx · .xls · .csv · .pdf (password-protected files are fine)</div>
           </div>
           <div id="import-status" class="mt"></div>
           <div id="import-preview"></div>
@@ -554,7 +554,15 @@
       const wb = XLSX.read(text, { type: 'string', raw: true });
       rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
     } else {
-      const wb = XLSX.read(new Uint8Array(await f.arrayBuffer()), { type: 'array', cellDates: true });
+      let bytes = new Uint8Array(await f.arrayBuffer());
+      // Banks often lock Excel statements with a password; it opens the file here and isn't kept.
+      if (MDCrypto.isEncrypted(XLSX.CFB, bytes)) {
+        if (!password) return 'password';
+        const plain = await MDCrypto.decrypt(XLSX.CFB, bytes, password);
+        if (!plain) return 'password';
+        bytes = plain;
+      }
+      const wb = XLSX.read(bytes, { type: 'array', cellDates: true });
       // Use the sheet with the most rows.
       let best = null;
       for (const sn of wb.SheetNames) {
@@ -584,13 +592,13 @@
       const input = d.querySelector('#pdf-pass'), go = d.querySelector('#pdf-go');
       const tryOpen = async () => {
         if (!input.value) return;
-        go.disabled = true;
+        go.disabled = true; go.textContent = 'Opening…';
         try {
           const res = await parseFile(f, input.value);
           if (res === 'password') { d.querySelector('#pdf-err').hidden = false; input.select(); return; }
           result = res; d.close();
         } catch (e) { failed = e; d.close(); }
-        finally { go.disabled = false; }
+        finally { go.disabled = false; go.textContent = 'Open'; }
       };
       go.onclick = tryOpen;
       input.onkeydown = e => { if (e.key === 'Enter') tryOpen(); };
