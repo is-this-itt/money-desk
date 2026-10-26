@@ -97,12 +97,17 @@
   // Categories you picked yourself are kept.
   function refreshParsed() {
     if ((db.parserVersion || 1) >= MD.PARSER_VERSION) return false;
-    const seen = new Set();
+    const firstSource = new Map();
     db.txns = db.txns.filter(t => {
       const kind = (db.accounts[t.account] || {}).kind || 'bank';
       const oldKey = MD.merchantKey(t.merchant);
       const before = t.desc;
-      if (/\.pdf$/i.test(t.source || '')) t.desc = MD.cleanPdfDesc(t.desc, kind);
+      t.source = MD.maskSource(t.source);
+      if (/\.pdf$/i.test(t.source || '')) {
+        // Older versions read HDFC's "+ C" card credits (bill payments) as spending.
+        if (kind === 'card' && t.amount < 0 && MD.pdfCredit(t.desc)) t.amount = -t.amount;
+        t.desc = MD.cleanPdfDesc(t.desc, kind);
+      }
       const m = MD.extractMerchant(t.desc);
       t.merchant = m.name;
       const key = MD.merchantKey(m.name);
@@ -116,10 +121,12 @@
       // Keep the id unless the line itself was cleaned, so re-imports are still recognised.
       if (t.desc !== before) t.id = MD.txnId(t);
       t.desc = MD.redactDesc(t.desc);
-      if (seen.has(t.id)) return false;
-      seen.add(t.id);
-      return true;
+      // One id from two statements is one line imported twice; from one statement it is a real
+      // repeat (two identical small payments on one day), which numberRepeats below gives its own id.
+      if (!firstSource.has(t.id)) { firstSource.set(t.id, t.source); return true; }
+      return firstSource.get(t.id) === t.source;
     });
+    MD.numberRepeats(db.txns);
     db.parserVersion = MD.PARSER_VERSION;
     return true;
   }
@@ -526,7 +533,7 @@
   }
 
   async function parseFile(f, password) {
-    const opts = { account: importForm.account, accountKind: importForm.kind, rules: db.rules, source: f.name };
+    const opts = { account: importForm.account, accountKind: importForm.kind, rules: db.rules, source: MD.maskSource(f.name) };
     const name = f.name.toLowerCase();
     if (name.endsWith('.pdf')) {
       const pdfjs = window.pdfjsLib;
@@ -614,8 +621,8 @@
   }
 
   function showPreview(res, f) {
-    const existing = new Set(db.txns.map(t => t.id));
-    const fresh = res.txns.filter(t => !existing.has(t.id));
+    const known = MD.findImported(db.txns, res.txns);
+    const fresh = res.txns.filter((t, i) => !known.has(i));
     const dupes = res.txns.length - fresh.length;
     pending = { res, f, fresh, onDone: pending && pending.onDone };
     const out = fresh.filter(t => t.amount < 0).reduce((s, t) => s - t.amount, 0);
@@ -633,7 +640,7 @@
     }
     $('#import-preview').innerHTML = `${mapHTML}
       ${res.txns.length ? `<div class="table-wrap mt" style="max-height:340px"><table class="tx-table"><thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>
-      ${res.txns.slice(0, 60).map(t => `<tr style="${existing.has(t.id) ? 'opacity:.45' : ''}"><td class="muted num" style="white-space:nowrap">${fmtDate(t.date)}</td><td><div class="tx-merchant">${esc(t.merchant)}</div><div class="tx-desc">${esc(t.desc)}</div></td><td><span class="pill">${esc(t.category)}</span></td><td class="amt num ${t.amount > 0 ? 'in' : ''}">${t.amount > 0 ? '+' : '−'}${inr2.format(Math.abs(t.amount))}</td></tr>`).join('')}
+      ${res.txns.slice(0, 60).map((t, i) => `<tr style="${known.has(i) ? 'opacity:.45' : ''}"><td class="muted num" style="white-space:nowrap">${fmtDate(t.date)}</td><td><div class="tx-merchant">${esc(t.merchant)}</div><div class="tx-desc">${esc(t.desc)}</div></td><td><span class="pill">${esc(t.category)}</span></td><td class="amt num ${t.amount > 0 ? 'in' : ''}">${t.amount > 0 ? '+' : '−'}${inr2.format(Math.abs(t.amount))}</td></tr>`).join('')}
       </tbody></table></div>${res.txns.length > 60 ? `<p class="small muted">Showing 60 of ${res.txns.length}.</p>` : ''}` : ''}
       <div class="form-row mt">${fresh.length ? `<button class="btn primary" id="do-import">Import ${fresh.length} transactions into ${esc(res.opts.account)}</button>` : ''}<button class="btn" id="cancel-import">Cancel</button></div>`;
     $('#import-preview').querySelectorAll('[data-map]').forEach(s => s.addEventListener('change', () => {
@@ -963,6 +970,7 @@
       a.n++; if (t.date < a.from) a.from = t.date; if (t.date > a.to) a.to = t.date;
     }
     const rules = Object.entries(db.rules);
+    const stmts = statements();
     const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
     return `
       <div class="top"><div><h1>Settings</h1><div class="sub">Appearance, accounts, category rules and your data file</div></div></div>
@@ -972,6 +980,9 @@
         <div class="section"><div><h2>Accounts</h2><div class="desc">Every account you have imported statements for.</div></div>
           <div>${Object.keys(accts).length ? `<table class="list"><thead><tr><th>Account</th><th>Covers</th><th class="r">Transactions</th><th></th></tr></thead><tbody>${Object.entries(accts).sort().map(([n, a]) => `
             <tr><td><b>${esc(n)}</b><div class="small muted">${(db.accounts[n] || {}).kind === 'card' ? 'Credit card' : 'Bank account'}</div></td><td class="small muted">${fmtDate(a.from)} – ${fmtDate(a.to)}</td><td class="r num">${a.n}</td><td class="r"><button class="btn small danger" data-del-acct="${esc(n)}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">No accounts yet. <a href="#" data-go="import">Import a statement</a>.</p>'}</div></div>
+        <div class="section"><div><h2>Imported statements</h2><div class="desc">Each file you imported. Move one that went into the wrong account, or delete it to import it again.</div></div>
+          <div>${stmts.length ? `<table class="list"><thead><tr><th>Statement</th><th>Covers</th><th class="r">Transactions</th><th></th></tr></thead><tbody>${stmts.map((x, i) => `
+            <tr><td><b class="wrap-any">${esc(x.source || 'Added by hand')}</b><div class="small muted">${esc(x.account)}</div></td><td class="small muted">${fmtDate(x.from)} – ${fmtDate(x.to)}</td><td class="r num">${x.n}</td><td class="r nowrap"><button class="btn small" data-stmt-move="${i}">Move…</button> <button class="btn small danger" data-stmt-del="${i}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">None yet.</p>'}</div></div>
         <div class="section"><div><h2>Category rules</h2><div class="desc">Merchants you told Money Desk to always put in a category.</div></div>
           <div>${rules.length ? `<table class="list"><tbody>${rules.sort().map(([k, c]) => `<tr><td>${esc(k)}</td><td><span class="pill">${esc(c)}</span></td><td class="r"><button class="btn small" data-del-rule="${esc(k)}">Remove</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">None yet. When you change a category in Transactions and choose "Apply to future imports", the rule shows up here.</p>'}</div></div>
         <div class="section"><div><h2>Your data file</h2><div class="desc">${fileMode ? 'Saved on this laptop, with daily copies for 30 days.' : '<b>Not connected.</b> Open Money Desk from its Start menu shortcut so changes are saved to disk.'}</div></div>
@@ -983,6 +994,69 @@
         <div class="section"><div><h2>Delete everything</h2><div class="desc">Removes every transaction, account, rule and service.</div></div>
           <div><button class="btn danger" data-act="clear">Delete everything…</button></div></div>
       </div>`;
+  }
+
+  // ---------- Imported statements ----------
+  // One entry per file and account, in the order Settings lists them.
+  function statements() {
+    const by = new Map();
+    for (const t of db.txns) {
+      if (t.source === 'sample') continue;
+      const k = t.account + '\u0000' + t.source;
+      const x = by.get(k) || { account: t.account, source: t.source, n: 0, from: t.date, to: t.date };
+      by.set(k, x);
+      x.n++; if (t.date < x.from) x.from = t.date; if (t.date > x.to) x.to = t.date;
+    }
+    return [...by.values()].sort((a, b) => a.account.localeCompare(b.account) || (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+  }
+  const inStatement = x => t => t.account === x.account && t.source === x.source;
+  // Drops an account's entry once no transactions are left in it.
+  function pruneAccounts() {
+    const used = new Set(db.txns.map(t => t.account));
+    for (const n of Object.keys(db.accounts)) if (!used.has(n)) { delete db.accounts[n]; if (prefs.account === n) prefs.account = 'all'; }
+  }
+
+  function moveStatementDialog(x) {
+    const others = Object.keys(db.accounts).filter(n => n !== x.account).sort();
+    const d = openDialog({
+      title: 'Move statement',
+      body: `<p style="margin-top:0">Move the ${x.n} transactions from <b>${esc(x.source || 'this statement')}</b> out of <b>${esc(x.account)}</b>.</p>
+        <div class="form-grid">
+          <label class="fld">Move to<select id="mv-to">${others.map(n => `<option>${esc(n)}</option>`).join('')}<option value="">A new account…</option></select></label>
+          <label class="fld" data-new>New account name<input id="mv-name" maxlength="60" placeholder="e.g. SBI Credit Card"></label>
+          <label class="fld" data-new>Type<select id="mv-kind"><option value="card">Credit card</option><option value="bank">Bank account</option></select></label>
+        </div>
+        <div id="mv-err" class="mt" hidden></div>`,
+      foot: `<span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-mv-ok>Move</button>`,
+    });
+    const to = d.querySelector('#mv-to');
+    const sync = () => d.querySelectorAll('[data-new]').forEach(l => (l.hidden = to.value !== ''));
+    to.onchange = sync; sync();
+    d.querySelector('#mv-kind').value = (db.accounts[x.account] || {}).kind || 'card';
+    d.querySelector('[data-mv-ok]').onclick = () => {
+      const name = (to.value || d.querySelector('#mv-name').value).trim().slice(0, 60);
+      const box = d.querySelector('#mv-err');
+      const err = !name ? 'Give the new account a name.' : name === x.account ? 'That is the account it is in now.' : '';
+      if (err) { box.hidden = false; box.innerHTML = `<div class="note err">${esc(err)}</div>`; return; }
+      if (!db.accounts[name]) db.accounts[name] = { kind: d.querySelector('#mv-kind').value === 'bank' ? 'bank' : 'card' };
+      const kind = db.accounts[name].kind;
+      const moved = db.txns.filter(inStatement(x));
+      for (const t of moved) {
+        t.account = name;
+        // The account is part of the id, so a later import into the new account is still matched.
+        t.id = MD.txnId(t);
+        if (!t.manual) {
+          const m = MD.extractMerchant(t.desc);
+          let c = MD.categorize(t.desc, t.merchant, t.amount, db.rules, kind);
+          if (c === 'Other' && m.person) c = 'People (UPI)';
+          t.category = c;
+        }
+      }
+      MD.numberRepeats(moved);
+      pruneAccounts();
+      save(); d.close(); render();
+      toast(`Moved ${moved.length} transactions to ${esc(name)}.`);
+    };
   }
 
   // ---------- Wiring ----------
@@ -1043,6 +1117,14 @@
       if (!(await confirmDialog(`Delete ${n}?`, `All ${db.txns.filter(t => t.account === n).length} transactions in "${n}" will be removed. You can import the statements again later.`, 'Delete account', true))) return;
       db.txns = db.txns.filter(t => t.account !== n); delete db.accounts[n];
       if (prefs.account === n) prefs.account = 'all';
+      save(); render();
+    });
+    root.querySelectorAll('[data-stmt-move]').forEach(b => (b.onclick = () => moveStatementDialog(statements()[+b.dataset.stmtMove])));
+    root.querySelectorAll('[data-stmt-del]').forEach(b => b.onclick = async () => {
+      const x = statements()[+b.dataset.stmtDel];
+      if (!(await confirmDialog('Delete this statement?', `The ${x.n} transactions from "${x.source || 'this statement'}" in ${x.account} will be removed. You can import the file again later.`, 'Delete statement', true))) return;
+      db.txns = db.txns.filter(t => !inStatement(x)(t));
+      pruneAccounts();
       save(); render();
     });
     root.querySelectorAll('[data-del-rule]').forEach(b => b.onclick = () => { delete db.rules[b.dataset.delRule]; save(); render(); });

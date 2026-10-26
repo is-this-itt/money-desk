@@ -389,3 +389,44 @@ test('SBI UPI reversals are refunds', () => {
   const again = MD.makeTxn({ date: '2026-05-01', desc: t.desc, amount: 250, account: 'S', accountKind: 'bank', rules: {} });
   assert.deepStrictEqual([again.merchant, again.category], ['UPI Reversal', 'Refunds & cashback']);
 });
+
+test('Repeated lines keep their own ids; re-imports and reworded copies are found', () => {
+  const opts = { account: 'Card', accountKind: 'card', rules: {}, source: 'x.pdf' };
+  const lines = ['05/01/2026 UPI- -TEA STALL IN 30.00', '05/01/2026 UPI- -TEA STALL IN 30.00', '06/01/2026 UPI- -TEA STALL IN 30.00'];
+  const a = MD.linesToTxns(lines, opts).txns;
+  assert.strictEqual(new Set(a.map(t => t.id)).size, 3);
+  assert.strictEqual(a[1].id, a[0].id + 'd2');
+  // The same file again: every line is already saved.
+  assert.strictEqual(MD.findImported(a, MD.linesToTxns(lines, opts).txns).size, 3);
+  // A second download of a statement can word a line a little differently.
+  const mk = (desc, account, source) => MD.makeTxn({ date: '2026-02-10', desc, amount: -499, account, accountKind: 'card', rules: {}, source });
+  const saved = [mk('ACME STREAMING MUMBAI IN', 'Card', 'a.pdf')];
+  const again = [mk('ACME STREAMING MUMBAI', 'Card', 'b.pdf'), mk('ACME STREAMING MUMBAI', 'Card', 'b.pdf'), mk('ACME STREAMING MUMBAI', 'Other card', 'b.pdf')];
+  // Each saved line matches once, and only in its own account.
+  assert.deepStrictEqual([...MD.findImported(saved, again)], [0]);
+});
+
+test('HDFC newer card layout: "+ C" is a credit, time and Ref# are dropped', () => {
+  const opts = { account: 'HDFC', accountKind: 'card', rules: {}, source: 'h.pdf' };
+  const [pay, emi] = MD.linesToTxns([
+    '02/02/2026 | | 10:15 BPPY CC PAYMENT AB11112222333344 (Ref# ST000011112222333344) + C 1,500.00',
+    '14/02/2026 | | 00:00 OFFUS EMI,PRIN NB:03, (Ref# ) C 640.00',
+  ], opts).txns;
+  assert.strictEqual(pay.amount, 1500);
+  assert.strictEqual(pay.category, 'Card payments & transfers');
+  assert.ok(/^BPPY CC PAYMENT/.test(pay.desc) && !/Ref#|10:15|\+ C/.test(pay.desc));
+  assert.strictEqual(emi.amount, -640);
+  assert.strictEqual(emi.desc, 'OFFUS EMI,PRIN NB:03,');
+  assert.strictEqual(emi.category, 'EMI & loans');
+  // A line saved by an older version is cleaned the same way when the app relabels it.
+  assert.strictEqual(MD.cleanPdfDesc('| | 00:00 OFFUS EMI,PRIN NB:03, (Ref# ) C', 'card'), 'OFFUS EMI,PRIN NB:03,');
+  assert.ok(MD.pdfCredit('| | 10:15 BPPY CC PAYMENT ABXX3344 (Ref# STXXXX3344) + C'));
+  assert.ok(!MD.pdfCredit('| | 00:00 OFFUS EMI,PRIN NB:03, (Ref# ) C'));
+  // Reward points that a refund takes back are not part of the merchant name.
+  assert.strictEqual(MD.cleanPdfDesc('ACME TRAVELS PVT NEW DELHI IN -40', 'card'), 'ACME TRAVELS PVT NEW DELHI IN');
+});
+
+test('Long numbers in statement file names are masked', () => {
+  assert.strictEqual(MD.maskSource('1234567890123456_01022026.pdf'), 'XXXXXXXXXXXX3456_01022026.pdf');
+  assert.strictEqual(MD.maskSource('4111XXXXXXXX1111_12345_Statement.pdf'), '4111XXXXXXXX1111_12345_Statement.pdf');
+});

@@ -157,10 +157,18 @@
 
   // Card PDF rows carry reward points and footer text next to the description.
   function cleanPdfDesc(d, kind) {
-    let s = clean(d).replace(/\s+\S*%.*$/, '').replace(/\s+#.*$/, '');
-    if (kind === 'card') s = s.replace(/\s\d{1,5}(?=(\s[A-Za-z]{2})?$)/, '');
+    let s = clean(d);
+    // HDFC's newer card layout: "| | hh:mm <details> (Ref# ...) + C", where C is the
+    // rupee sign and "+" marks a credit (see pdfCredit).
+    if (/^\|/.test(s)) s = s.replace(/^[|\s]+/, '').replace(/^\d{1,2}:\d{2}\s+/, '').replace(/\s*\(Ref#[^)]*\)/gi, ' ').replace(/\s*\+?\s*C$/, '');
+    s = s.replace(/\s+\S*%.*$/, '').replace(/\s+#.*$/, '');
+    // Card lines end in reward points, negative when a refund takes them back ("... IN -125").
+    if (kind === 'card') s = s.replace(/\s-?\d{1,5}(?=(\s[A-Za-z]{2})?$)/, '');
     return s.trim();
   }
+
+  // True when a card line marks its amount as a credit with "+" before the rupee sign (HDFC).
+  const pdfCredit = text => /\+\s*(?:C|₹)?\s*$/.test(text);
 
   function titleCase(s) {
     return s.toLowerCase().replace(/\b([a-z])/g, (m, c) => c.toUpperCase()).replace(/\b(Upi|Atm|Emi|Sip|Lic|Neft|Imps|Gst|Bse|Nse|Hdfc|Sbi|Icici|Irctc|Kfc|Pvr)\b/g, w => w.toUpperCase());
@@ -348,6 +356,45 @@
     return (h >>> 0).toString(36) + s.length.toString(36);
   }
 
+  // The same line can really happen twice (two identical small payments at one shop on one day). The second and
+  // later copies get "d2", "d3"... on their id, so they are kept and a re-import still matches.
+  function numberRepeats(txns) {
+    const seen = new Map();
+    for (const t of txns) {
+      const n = (seen.get(t.id) || 0) + 1;
+      seen.set(t.id, n);
+      if (n > 1) t.id += 'd' + n;
+    }
+    return txns;
+  }
+
+  // Which newly read lines are already saved: the same id, or the same account, date and amount
+  // with one description starting the other ("... MUMBAI" vs "... MUMBAI IN"), since two
+  // downloads of one statement can be laid out differently. Each saved line matches once.
+  // Returns a Set of indexes into fresh.
+  function findImported(saved, fresh) {
+    const ids = new Set(saved.map(t => t.id));
+    const norm = d => String(d || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const pool = new Map();
+    for (const t of saved) {
+      const k = `${t.account}|${t.date}|${t.amount}`;
+      if (!pool.has(k)) pool.set(k, []);
+      pool.get(k).push({ d: norm(t.desc), id: t.id, used: false });
+    }
+    const out = new Set();
+    fresh.forEach((t, i) => {
+      const list = pool.get(`${t.account}|${t.date}|${t.amount}`) || [];
+      if (ids.has(t.id)) { const hit = list.find(x => x.id === t.id); if (hit) hit.used = true; out.add(i); return; }
+      const d = norm(t.desc);
+      const hit = d.length >= 8 && list.find(x => !x.used && x.d.length >= 8 && (x.d.startsWith(d) || d.startsWith(x.d)));
+      if (hit) { hit.used = true; out.add(i); }
+    });
+    return out;
+  }
+
+  // File names can carry a card or statement number: keep only the last 4 digits of long ones.
+  const maskSource = name => String(name || '').replace(/\d{10,}/g, n => 'X'.repeat(n.length - 4) + n.slice(-4));
+
   const CREDIT_WORDS = /(refund|reversal|cashback|cash back|payment received|thank you|credited|credit$)/i;
 
   // rows: array of arrays. map: column indexes. Returns { txns, skipped }
@@ -389,7 +436,7 @@
       out.push({ date, desc, amount });
     }
     return {
-      txns: out.map(t => makeTxn({ date: t.date, desc: t.desc + (t.__more || ''), amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source })),
+      txns: numberRepeats(out.map(t => makeTxn({ date: t.date, desc: t.desc + (t.__more || ''), amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source }))),
       skipped,
     };
   }
@@ -438,7 +485,7 @@
         if (!a || !a.value) { skipped++; continue; }
         const v = Math.abs(a.value);
         if (a.marker) amount = a.marker === 'cr' ? v : -v;
-        else if (opts.accountKind === 'card') amount = CREDIT_WORDS.test(desc) ? v : -v;
+        else if (opts.accountKind === 'card') amount = CREDIT_WORDS.test(desc) || pdfCredit(rest.slice(0, amts[amts.length - 1].index)) ? v : -v;
         else amount = a.value < 0 ? a.value : -v;
       }
       if (!desc && !amount) { skipped++; continue; }
@@ -446,7 +493,7 @@
       out.push(last);
     }
     return {
-      txns: out.map(t => makeTxn({ date: t.date, desc: t.desc, amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source })),
+      txns: numberRepeats(out.map(t => makeTxn({ date: t.date, desc: t.desc, amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source }))),
       skipped,
     };
   }
@@ -718,8 +765,8 @@
     return lines.join('\n');
   }
 
-  const PARSER_VERSION = 8;
-  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
+  const PARSER_VERSION = 9;
+  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, numberRepeats, findImported, maskSource, pdfCredit, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);
