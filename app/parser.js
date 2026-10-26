@@ -403,13 +403,14 @@
     notes: ['notes', 'note', 'remarks', 'comments'], status: ['status', 'active'],
   };
   // Most specific first: "Home loan account" is a loan and "Health insurance card" is insurance.
+  // "Debit card" comes before everything because the card rule would otherwise call it a credit card.
   const TYPE_WORDS = [
     ['Bank account', /\bdebit card\b/],
     ['Loan / EMI', /\bloans?\b|\bemis?\b/], ['Insurance', /\binsur|\bpolicy\b|\blic\b/],
     ['Mandate / autopay', /\bmandate|\bauto ?pay\b|\bnach\b|\bstanding\b/],
     ['SIP / investment', /\bsips?\b|\binvest|\bmutual\b|\bfunds?\b|\bstocks?\b|\bppf\b|\bnps\b|\bfds?\b|\bdeposit/],
     ['Subscription', /\bsubscri|\bott\b|\bmembership\b/],
-    ['Credit card', /\bcredit\b|\bcards?\b/], ['Bank account', /\bbank\b|\bsavings\b|\bcurrent\b|\baccount\b/], ['Other', /\bother\b/],
+    ['Credit card', /\bcredit\b|\bcards?\b/], ['Bank account', /\bbank\b|\bsavings\b|\bcurrent\b|\baccount\b/],
   ];
   const FREQ_WORDS = [
     ['Monthly', /^(monthly|every month|per month|a month|month|pm|p\.m\.)$/], ['Quarterly', /^(quarterly|every 3 months|every quarter|quarter)$/],
@@ -417,10 +418,10 @@
   ];
   const normHead = h => String(h == null ? '' : h).toLowerCase().replace(/\s+/g, ' ').trim();
 
+  const MAX_SERVICE_ROWS = 1000;
   // Reads rows (arrays of cells) from a filled-in template. Returns one entry per non-empty row:
   // { row, value, problems, notes }, where value has the fields of a service and problems lists
   // why it can't be imported. The caller still cleans and masks each value before saving it.
-  const MAX_SERVICE_ROWS = 1000;
   function readServiceRows(rows, firstRow = 1) {
     // The header row has a Name column and at least one other known column, so a title such as
     // "Service" above the table isn't mistaken for it.
@@ -459,8 +460,8 @@
       else if (/^\d{4}$/.test(l4)) v.last4 = l4;
       else if (typeof l4raw === 'number' && /^\d{1,3}$/.test(l4)) v.last4 = l4.padStart(4, '0');
       // Excel keeps only 15 digits of a long number, so its last 4 can't be trusted.
-      else if (typeof l4raw === 'number') problems.push('Last 4 digits: type only the last 4 (Excel changes long numbers)');
-      else if (/^\d{5,19}$/.test(l4)) { v.last4 = l4.slice(-4); notes.push('Kept only the last 4 digits'); }
+      else if (typeof l4raw === 'number' && l4raw >= 1e15) problems.push('Last 4 digits: type only the last 4 (Excel changes long numbers)');
+      else if (typeof l4raw !== 'number' && /^\d{5,19}$/.test(l4)) { v.last4 = l4.slice(-4); notes.push('Kept only the last 4 digits'); }
       else problems.push('Last 4 digits must be 4 numbers');
 
       const a = cell('amount');
@@ -472,7 +473,7 @@
 
       const d = cell('day');
       if (d === '' || d == null) v.day = null;
-      else if (d instanceof Date) v.day = d.getDate();
+      else if (d instanceof Date) v.day = d.getDate(); // Excel turns "5-Oct" into a date; the day is what was meant
       else {
         const n = Number(String(d).replace(/(st|nd|rd|th)$/i, '').trim());
         if (Number.isInteger(n) && n >= 1 && n <= 31) v.day = n; else problems.push('Day must be between 1 and 31');
@@ -485,6 +486,37 @@
     }
     return { rows: out };
   }
+  // The downloadable template: a Services sheet with the column names and a How to fill sheet.
+  // The Last 4 digits column is formatted as text for TEMPLATE_ROWS rows so Excel keeps 0123.
+  const TEMPLATE_ROWS = 500;
+  function serviceTemplateBook(XLSX) {
+    const wb = XLSX.utils.book_new();
+    const list = XLSX.utils.aoa_to_sheet([SVC_COLUMNS]);
+    list['!cols'] = [18, 24, 18, 13, 11, 12, 7, 18, 34, 10].map(wch => ({ wch }));
+    const last4 = XLSX.utils.encode_col(SVC_COLUMNS.indexOf('Last 4 digits'));
+    for (let r = 2; r <= TEMPLATE_ROWS + 1; r++) list[last4 + r] = { t: 's', v: '', z: '@' };
+    list['!ref'] = 'A1:' + XLSX.utils.encode_col(SVC_COLUMNS.length - 1) + (TEMPLATE_ROWS + 1);
+    XLSX.utils.book_append_sheet(wb, list, 'Services');
+    const help = XLSX.utils.aoa_to_sheet([
+      ['Column', 'Required', 'What to enter'],
+      ['Type', 'No', SVC_TYPES.join(', ') + '. Left empty, it is saved as Other.'],
+      ['Name', 'Yes', 'What you call it, e.g. Netflix, HDFC Regalia, SBI Savings.'],
+      ['Bank or provider', 'No', 'e.g. HDFC, Groww, LIC.'],
+      ['Last 4 digits', 'No', `Only the last 4 digits of a card or account. Never the full number. The first ${TEMPLATE_ROWS} rows keep a leading zero; in a CSV file, type all 4 digits, e.g. 0123.`],
+      ['Amount', 'No', 'Rupees, e.g. 649.'],
+      ['How often', 'No', SVC_FREQ.join(', ') + '.'],
+      ['Day', 'No', 'Day of the month it is billed or debited, 1 to 31.'],
+      ['Paid from', 'No', 'The account or card it is paid from, e.g. SBI Savings.'],
+      ['Notes', 'No', 'Anything else, e.g. renews in March.'],
+      ['Status', 'No', 'Active or Stopped. Left empty, it is Active.'],
+      [],
+      ['Do not enter passwords, PINs, CVVs or full card or account numbers.'],
+    ]);
+    help['!cols'] = [{ wch: 18 }, { wch: 10 }, { wch: 90 }];
+    XLSX.utils.book_append_sheet(wb, help, 'How to fill');
+    return wb;
+  }
+
   // Reads a workbook made by SheetJS (passed in, so tests can use the vendored copy). A CSV is read
   // as plain text so values like 0123 keep their leading zero.
   function readServiceBook(XLSX, data, isCsv) {
@@ -515,11 +547,11 @@
     return { ready, lines, dup, bad };
   }
 
-  // Two entries are the same service when type, name, last 4 digits, amount and day all match.
-  const serviceKey = v => [v.type, merchantKey(v.name), v.last4, v.amount == null || v.amount === '' ? '' : Number(v.amount), v.day || ''].join('|');
+  // Two entries are the same service when type, name, provider, last 4 digits, amount and day all match.
+  const serviceKey = v => [v.type, merchantKey(v.name), merchantKey(v.provider || ''), v.last4, v.amount == null || v.amount === '' ? '' : Number(v.amount), v.day || ''].join('|');
 
   const PARSER_VERSION = 4;
-  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, planServiceImport, serviceKey };
+  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);

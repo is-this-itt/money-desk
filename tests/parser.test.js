@@ -214,3 +214,23 @@ test('services: a long number typed in Excel is a problem, row numbers follow th
   const res = MD.readServiceBook(XLSX, new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' })), false);
   assert.deepStrictEqual(res.rows.map(x => [x.row, x.value.name]), [[4, 'Netflix']]);
 });
+
+test('the downloadable template reads back cleanly and keeps Last 4 as text', () => {
+  const XLSX = require('../app/vendor/xlsx.full.min.js');
+  const wb = MD.serviceTemplateBook(XLSX);
+  assert.deepStrictEqual(wb.SheetNames, ['Services', 'How to fill']);
+  const bytes = new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' }));
+  assert.deepStrictEqual(MD.readServiceBook(XLSX, bytes, false), { rows: [] });
+  const back = XLSX.read(bytes, { type: 'array', cellNF: true }).Sheets.Services;
+  assert.strictEqual(back.D2.z, '@');
+  // every template column is recognised as a header
+  XLSX.utils.sheet_add_aoa(wb.Sheets.Services, [['Bank account', 'Savings', 'HDFC', '0123', 1, 'None', 1, 'x', 'y', 'Active']], { origin: 'A2' });
+  const filled = MD.readServiceBook(XLSX, new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' })), false);
+  assert.deepStrictEqual(filled.rows[0].value, { name: 'Savings', provider: 'HDFC', from: 'x', notes: 'y', active: true, type: 'Bank account', freq: 'None', last4: '0123', amount: 1, day: 1 });
+});
+
+test('service key includes the provider; short numeric last 4 has the plain message', () => {
+  const a = { type: 'Bank account', name: 'Savings', provider: 'HDFC', last4: '', amount: null, day: null };
+  assert.notStrictEqual(MD.serviceKey(a), MD.serviceKey({ ...a, provider: 'SBI' }));
+  assert.deepStrictEqual(MD.readServiceRows([['Name', 'Last 4 digits'], ['x', 12345]]).rows[0].problems, ['Last 4 digits must be 4 numbers']);
+});

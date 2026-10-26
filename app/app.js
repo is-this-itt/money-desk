@@ -793,31 +793,7 @@
 
   // ---------- Import services from a spreadsheet ----------
   function serviceTemplate() {
-    const wb = XLSX.utils.book_new();
-    const list = XLSX.utils.aoa_to_sheet([MD.SVC_COLUMNS]);
-    list['!cols'] = [18, 24, 18, 13, 11, 12, 7, 18, 34, 10].map(wch => ({ wch }));
-    // Last 4 digits is a text column, so Excel keeps a leading zero (0123).
-    for (let r = 2; r <= 300; r++) list['D' + r] = { t: 's', v: '', z: '@' };
-    list['!ref'] = 'A1:J300';
-    XLSX.utils.book_append_sheet(wb, list, 'Services');
-    const help = XLSX.utils.aoa_to_sheet([
-      ['Column', 'Required', 'What to enter'],
-      ['Type', 'No', SVC_TYPES.join(', ') + '. Left empty, it is saved as Other.'],
-      ['Name', 'Yes', 'What you call it, e.g. Netflix, HDFC Regalia, SBI Savings.'],
-      ['Bank or provider', 'No', 'e.g. HDFC, Groww, LIC.'],
-      ['Last 4 digits', 'No', 'Only the last 4 digits of a card or account. Never the full number. In a CSV file, type all 4 digits, e.g. 0123.'],
-      ['Amount', 'No', 'Rupees, e.g. 649.'],
-      ['How often', 'No', SVC_FREQ.join(', ') + '.'],
-      ['Day', 'No', 'Day of the month it is billed or debited, 1 to 31.'],
-      ['Paid from', 'No', 'The account or card it is paid from, e.g. SBI Savings.'],
-      ['Notes', 'No', 'Anything else, e.g. renews in March.'],
-      ['Status', 'No', 'Active or Stopped. Left empty, it is Active.'],
-      [],
-      ['Do not enter passwords, PINs, CVVs or full card or account numbers.'],
-    ]);
-    help['!cols'] = [{ wch: 18 }, { wch: 10 }, { wch: 90 }];
-    XLSX.utils.book_append_sheet(wb, help, 'How to fill');
-    const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const bytes = XLSX.write(MD.serviceTemplateBook(XLSX), { bookType: 'xlsx', type: 'array' });
     download('money-desk-services-template.xlsx', bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   }
 
