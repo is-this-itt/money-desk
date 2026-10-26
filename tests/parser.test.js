@@ -495,6 +495,9 @@ test('A card line with no D or C on a statement that marks them is a note, not a
     '06 Mar 26 TRANSFER TO MERCHANT EMI 12,000.00',
   ];
   assert.deepStrictEqual(MD.linesToTxns(lines, opts).txns.map(t => t.amount), [-410, -250, 5000, -12000, -90]);
+  // An unmarked line with an amount of its own is kept, in case its letter was lost.
+  assert.deepStrictEqual(MD.linesToTxns([...lines, '07 Mar 26 PETROL PUMP 1,800.00', '08 Mar 26 PHARMACY 120.00 D', '09 Mar 26 BAKERY 60.00 D', '10 Mar 26 TAXI 300.00 D'], opts).txns.map(t => t.amount),
+    [-410, -250, 5000, -12000, -90, -1800, -120, -60, -300]);
   // Statements that never mark lines (most card PDFs) keep every line.
   assert.strictEqual(MD.linesToTxns(['01 Mar 26 GROCERY MART 410.00', '02 Mar 26 BOOK HOUSE 250.00'], opts).txns.length, 2);
   // The EMI note saved by an older version is dropped when the app relabels.

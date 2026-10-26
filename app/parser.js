@@ -379,6 +379,7 @@
   // the id), numbered against lines already there, and categories for the new account's type.
   // Categories you picked yourself are kept. Lines already in that account (findImported) are
   // dropped instead of being added twice. Returns { txns, moved, dropped }.
+  // The moved line objects are changed in place, including the ones dropped afterwards.
   function moveStatement(txns, inStatement, account, accountKind, rules) {
     const there = txns.filter(t => t.account === account);
     let moved = txns.filter(inStatement);
@@ -409,7 +410,7 @@
       const kind = (data.accounts[t.account] || {}).kind || 'bank';
       const oldKey = merchantKey(t.merchant);
       const before = t.desc;
-      t.source = maskSource(t.source);
+      if (t.source) t.source = maskSource(t.source);
       if (kind === 'card' && /\.pdf$/i.test(t.source || '') && MEMO_LINE.test(clean(t.desc))) return false;
       if (/\.pdf$/i.test(t.source || '')) {
         if (kind === 'card' && t.amount < 0 && pdfCredit(t.desc)) t.amount = -t.amount;
@@ -431,7 +432,8 @@
       // One id from two statements is one line imported twice. From one statement it is a real
       // repeat: imports skip lines whose id is already saved, so one file can't come in twice.
       // The trade-off: two different statements that overlap in dates and both list the very
-      // same line (same date, amount and wording) keep only one copy of it.
+      // same line (same date, amount and wording) keep only one copy of it. Masking can also make
+      // two file names alike (long numbers that differ only before their last four digits).
       if (!firstSource.has(t.id)) { firstSource.set(t.id, t.source); return true; }
       return firstSource.get(t.id) === t.source;
     });
@@ -576,11 +578,16 @@
       last = { date, desc: desc || 'Transaction', amount, marked };
       out.push(last);
     }
-    // On a card statement that marks its lines D or C, a line without the letter is a note,
-    // not a charge.
+    // On a card statement that marks its lines D or C, a line without the letter that repeats
+    // the amount of a marked line is a note about that line, not a second charge. Other
+    // unmarked lines are kept.
     if (opts.accountKind === 'card') {
-      const n = out.filter(t => t.marked).length;
-      if (n >= 5 && n >= out.length * 0.8) { skipped += out.length - n; out = out.filter(t => t.marked); }
+      const marked = out.filter(t => t.marked);
+      if (marked.length >= 5 && marked.length >= out.length * 0.8) {
+        const charged = new Set(marked.map(t => Math.abs(t.amount)));
+        const keep = out.filter(t => t.marked || !charged.has(Math.abs(t.amount)));
+        skipped += out.length - keep.length; out = keep;
+      }
     }
     return {
       txns: numberRepeats(out.map(t => makeTxn({ date: t.date, desc: t.desc, amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source }))),

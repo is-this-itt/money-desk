@@ -979,7 +979,7 @@
       by.set(k, x);
       x.n++; if (t.date < x.from) x.from = t.date; if (t.date > x.to) x.to = t.date;
     }
-    return [...by.values()].sort((a, b) => a.account.localeCompare(b.account) || (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+    return [...by.values()].sort((a, b) => a.account.localeCompare(b.account) || a.from.localeCompare(b.from));
   }
   const inStatement = x => t => t.account === x.account && t.source === x.source;
   // Drops the entries of the given accounts once no transactions are left in them. Other empty
@@ -993,9 +993,9 @@
     const others = Object.keys(db.accounts).filter(n => n !== x.account).sort();
     const d = openDialog({
       title: 'Move statement',
-      body: `<p style="margin-top:0">Move the ${x.n} transactions from <b>${esc(x.source)}</b> out of <b>${esc(x.account)}</b>.</p>
+      body: `<p style="margin-top:0">Move the ${x.n} transactions dated ${fmtDate(x.from)} to ${fmtDate(x.to)} from <b>${esc(x.source)}</b> out of <b>${esc(x.account)}</b>.</p>
         <div class="form-grid">
-          <label class="fld">Move to<select id="mv-to">${others.map(n => `<option>${esc(n)}</option>`).join('')}<option value="">A new account…</option></select></label>
+          <label class="fld">Move to<select id="mv-to">${others.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}<option value="">A new account…</option></select></label>
           <label class="fld" data-new>New account name<input id="mv-name" maxlength="60" placeholder="e.g. SBI Credit Card"></label>
           <label class="fld" data-new>Type<select id="mv-kind"><option value="card">Credit card</option><option value="bank">Bank account</option></select></label>
         </div>
@@ -1093,7 +1093,7 @@
     root.querySelectorAll('[data-stmt-del]').forEach(b => b.onclick = async () => {
       const x = stmtOf(b.dataset.stmtDel);
       if (!x) return;
-      if (!(await confirmDialog('Delete this statement?', `The ${x.n} transactions from "${x.source}" in ${x.account} will be removed. You can import the file again later.`, 'Delete statement', true))) return;
+      if (!(await confirmDialog('Delete this statement?', `The ${x.n} transactions dated ${fmtDate(x.from)} to ${fmtDate(x.to)} from "${x.source}" in ${x.account} will be removed${db.txns.some(t => t.account === x.account && !inStatement(x)(t)) ? '' : `, and ${x.account} with them, since nothing else is in it`}. You can import the file again later.`, 'Delete statement', true))) return;
       db.txns = db.txns.filter(t => !inStatement(x)(t));
       pruneAccounts([x.account]);
       save(); render();
