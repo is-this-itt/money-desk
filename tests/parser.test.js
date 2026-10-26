@@ -287,3 +287,33 @@ test('Kotak lines: card, ATM, NACH and interest payees; merchant names never kee
   for (const d of ['KOTAK811/626912345678', 'UPI/9876543210@ybl/601012345678/UPI', 'NACH-10-DR-TEST AUTO CREDIT LI-B2WBAN0012345', 'Int.Pd:0123456789:01-07-2026'])
     assert.ok(!/\d{5,}/.test(MD.extractMerchant(d).name), d);
 });
+
+test('reading check: layouts keep only bank words, counts flag unread and unmasked rows', () => {
+  assert.strictEqual(MD.lineShape('WDL TFR UPI/DR/XXXXXXXX3937/Rahul Sh/KKBK/r ahul811pa/RUSH XXXXXXXXX2091 AT 00426 TESTPUR'), 'WDL TFR UPI/DR/x9/a/a/a9a/a x9 AT 9 a');
+  assert.strictEqual(MD.lineShape('UPI/ra***@oksbi/XXXXXXXX8068/UPI'), 'UPI/a*@a/x9/UPI');
+  // Names in any script, and digits in any script, are taken out.
+  assert.strictEqual(MD.lineShape('UPI/राहुल शर्मा/XXXX१२३४/UPI'), 'UPI/a/x9/UPI');
+  assert.strictEqual(MD.lineShape('TO P AC GL SI BY'), 'a');
+  const shape = MD.lineShape('DEP TFR NEFT*IDFB0001234*IDFBH2601234567*PRIYA SHARMA ENTERPRISES 12345674300 AT 01234 TESTPUR');
+  assert.ok(!/priya|sharma|\d{2,}/i.test(shape), shape);
+  const txns = [
+    { account: 'B', desc: 'UPI/XXXX1234/a', merchant: 'Shop', category: 'Other' },
+    { account: 'B', desc: 'UPI/XXXX5678/b', merchant: 'Shop', category: 'Other' },
+    { account: 'B', desc: 'NEFT/ACME', merchant: 'Acme', category: 'Other income' },
+    { account: 'B', desc: 'SALARY ACME', merchant: 'Acme', category: 'Salary' },
+    { account: 'A', desc: 'TO 123456789 rahul.s@oksbi', merchant: 'Rahul', category: 'People (UPI)' },
+    { account: 'A', desc: 'UPI/XXXX1234', merchant: 'Kotak811 98765', category: 'People (UPI)' },
+    { account: 'A', desc: 'UPI/XXXX1234', merchant: 'pay@ybl', category: 'People (UPI)' },
+    { account: 'A', merchant: 'No line', category: 'Other' },
+  ];
+  const rep = MD.readingReport(txns);
+  assert.deepStrictEqual(rep.map(a => [a.account, a.rows, a.unread, a.unmasked]), [['A', 4, 1, 3], ['B', 4, 3, 0]]);
+  assert.deepStrictEqual(rep[1].shapes, [{ shape: 'UPI/x9/a', count: 2 }, { shape: 'NEFT/a', count: 1 }]);
+  assert.deepStrictEqual(rep[0].unmaskedShapes, [{ shape: 'UPI/x9', count: 2 }, { shape: 'a 9 a@a', count: 1 }]);
+  assert.ok(!/Shop|Acme|Rahul|rahul|123456789/.test(JSON.stringify(rep.map(a => [a.shapes, a.unmaskedShapes]))));
+  assert.strictEqual(MD.readingReport(txns, 1)[1].shapes.length, 1);
+  assert.deepStrictEqual(MD.readingReport([]), []);
+  // A phone number written in two groups passes masking, so the check flags it.
+  assert.strictEqual(MD.readingReport([{ account: 'C', desc: MD.redactDesc('UPI/CALL 98765 43210/UPI'), merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 1);
+  assert.strictEqual(MD.lineShape('BILL PAYMENT'), 'a PAYMENT');
+});
