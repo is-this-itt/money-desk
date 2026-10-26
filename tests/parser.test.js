@@ -234,3 +234,22 @@ test('service key includes the provider; short numeric last 4 has the plain mess
   assert.notStrictEqual(MD.serviceKey(a), MD.serviceKey({ ...a, provider: 'SBI' }));
   assert.deepStrictEqual(MD.readServiceRows([['Name', 'Last 4 digits'], ['x', 12345]]).rows[0].problems, ['Last 4 digits must be 4 numbers']);
 });
+
+test('SBI 2026 descriptions: words cut by the statement still give the payee and category', () => {
+  const cat = (desc, amount) => { const m = MD.extractMerchant(desc); let c = MD.categorize(desc, m.name, amount, {}, 'bank'); if (c === 'Other' && m.person) c = 'People (UPI)'; return [m.name, c]; };
+  const tail = ' 12345672091 AT 01234 TESTPUR';
+  assert.deepStrictEqual(cat('WDL TFR UPI/DR/612345678901/Blinkit/HDFC/bl inkit.rz/Payvi' + tail, -250), ['Blinkit', 'Groceries']);
+  assert.deepStrictEqual(cat('WDL TFR UPI/DR/612345678902/RAHUL SH/SBIN/r ahulsharm/UPI' + tail, -500), ['Rahul Sh', 'People (UPI)']);
+  assert.deepStrictEqual(cat('WDL TFR UPI/DR/612345678903/BHARTI A/YESB/a irtelprep/UPI' + tail, -299), ['Bharti A', 'Bills & utilities']);
+  assert.deepStrictEqual(cat('WDL TFR UPI/DR/612345678904/SBI Card/YESB/s bicardp.b/UPI' + tail, -3000), ['SBI Card', 'Card payments & transfers']);
+  assert.deepStrictEqual(cat('WDL TFR UPI/DR/612345678905/9876543210/utib/9 87654321/UPI' + tail, -100), ['UPI payment', 'People (UPI)']);
+  assert.deepStrictEqual(cat('DEP TFR NEFT*IDFB0001234*IDFBH2601234567*R ZPX PVT LTD PA 12345674300 AT 01234 TESTPUR', 90000), ['Rzpx Pvt Ltd Pa', 'Salary']);
+  assert.deepStrictEqual(cat('DEP TFR NEFT*UTIB0000004*AXISCN012345678*A XIS MUTUAL FUN 12345674300 AT 01234 TESTPUR', 20000), ['Axis Mutual Fun', 'Investments']);
+  assert.deepStrictEqual(cat('DEBIT ACHDr YESB00709 123458661 Indian Clearin', -5000), ['Indian Clearin', 'Investments']);
+  assert.deepStrictEqual(cat('WDL TFR SBIY1234567890123456789/P/Bill Payment 0 12349104 OF TEST JEWELLERS AT 01234 TESTPUR', -40000), ['Test Jewellers', 'Shopping']);
+  assert.deepStrictEqual(cat('WDL TFR INB TEST LIFE INSURANCE CO MPAN 12345672090 AT 01234 TESTPUR', -10000), ['Test Life Insurance Co Mpan', 'Insurance']);
+  assert.deepStrictEqual(cat('INTERES T CREDIT', 65), ['Interes T Credit', 'Interest & dividends']);
+  // The same rows as saved (masked) read the same way, so saved data can be re-labelled.
+  const masked = MD.redactDesc('WDL TFR UPI/DR/612345678901/Blinkit/HDFC/bl inkit.rz/Payvi' + tail);
+  assert.deepStrictEqual(cat(masked, -250), ['Blinkit', 'Groceries']);
+});
