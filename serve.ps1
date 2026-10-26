@@ -44,16 +44,23 @@ function Open-Window([string]$key) {
     "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
   )
   $exe = $browsers | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+  # Returns $true only when it opened an app window, the only kind that can get the badge below.
   try {
-    if ($exe) { Start-Process -FilePath $exe -ArgumentList "--app=$url", '--window-size=1440,920' }
-    else { Start-Process $url }
+    if ($exe) { Start-Process -FilePath $exe -ArgumentList "--app=$url", '--window-size=1440,920'; return $true }
+    Start-Process $url
   } catch { }
+  return $false
 }
 
 # The window belongs to Edge, so Windows would show (and pin) it as Edge. Once it appears, give it
 # Money Desk's own taskbar identity: its icon, its name, and Money Desk.vbs as what a pin starts.
 $badgeScript = {
   param([string]$dir, [bool]$stamp)
+  # Nothing here is needed for Money Desk to work, so a failure only leaves a line in this log
+  # (and the window keeps the Edge icon).
+  $ErrorActionPreference = 'Stop'
+  $log = Join-Path $dir 'data\taskbar-icon.log'
+  trap { try { Add-Content -LiteralPath $log -Value ('{0:s} {1}' -f (Get-Date), $_) } catch { }; return }
   Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -83,6 +90,7 @@ public static class MoneyDeskWindow {
   struct PropVariant { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr str; }
 
   static readonly Guid AppUserModel = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+  static Guid StoreIid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");  // IPropertyStore
 
   // The app window's title is the page title; normal browser windows add " - Microsoft Edge".
   // Windows that already carry the id are skipped, so a second window gets badged too.
@@ -99,6 +107,7 @@ public static class MoneyDeskWindow {
     return found;
   }
 
+  // The browsers Open-Window can start.
   static bool IsBrowser(IntPtr hwnd) {
     uint pid; GetWindowThreadProcessId(hwnd, out pid);
     try {
@@ -108,9 +117,8 @@ public static class MoneyDeskWindow {
   }
 
   static string CurrentId(IntPtr hwnd) {
-    var iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
     IPropertyStore store;
-    if (SHGetPropertyStoreForWindow(hwnd, ref iid, out store) != 0 || store == null) return null;
+    if (SHGetPropertyStoreForWindow(hwnd, ref StoreIid, out store) != 0 || store == null) return null;
     try {
       var key = new PropertyKey { fmtid = AppUserModel, pid = 5 };
       PropVariant v;
@@ -126,9 +134,8 @@ public static class MoneyDeskWindow {
   }
 
   public static bool Badge(IntPtr hwnd, string id, string command, string icon, string name) {
-    var iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
     IPropertyStore store;
-    if (SHGetPropertyStoreForWindow(hwnd, ref iid, out store) != 0 || store == null) return false;
+    if (SHGetPropertyStoreForWindow(hwnd, ref StoreIid, out store) != 0 || store == null) return false;
     try {
       Set(store, 2, command);  // RelaunchCommand: what a taskbar pin starts
       Set(store, 3, icon);     // RelaunchIconResource
@@ -141,9 +148,8 @@ public static class MoneyDeskWindow {
 
   // Gives a shortcut the same identity, so it and the window share one taskbar button.
   public static bool StampShortcut(string path, string id) {
-    var iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
     IPropertyStore store;
-    if (SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, 2 /* GPS_READWRITE */, ref iid, out store) != 0 || store == null) return false;
+    if (SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, 2 /* GPS_READWRITE */, ref StoreIid, out store) != 0 || store == null) return false;
     try { Set(store, 5, id); store.Commit(); return true; }
     finally { Marshal.ReleaseComObject(store); }
   }
@@ -153,13 +159,16 @@ public static class MoneyDeskWindow {
   $command = '"' + (Join-Path $env:WINDIR 'System32\wscript.exe') + '" "' + $vbs + '"'
   $icon = (Join-Path $dir 'money-desk.ico') + ',0'
   # Wait up to 30 seconds for the window to open and show its title.
-  for ($i = 0; $i -lt 60; $i++) {
+  $badged = $false
+  for ($i = 0; $i -lt 60 -and -not $badged; $i++) {
     $h = [MoneyDeskWindow]::Find('MoneyDesk.App')
-    if ($h -ne [IntPtr]::Zero) { [void][MoneyDeskWindow]::Badge($h, 'MoneyDesk.App', $command, $icon, 'Money Desk'); break }
-    Start-Sleep -Milliseconds 500
+    if ($h -ne [IntPtr]::Zero) { $badged = [MoneyDeskWindow]::Badge($h, 'MoneyDesk.App', $command, $icon, 'Money Desk') }
+    else { Start-Sleep -Milliseconds 500 }
   }
+  if (-not $badged) { Add-Content -LiteralPath $log -Value ('{0:s} the Money Desk window was not found or could not be badged' -f (Get-Date)) }
   # Money Desk shortcuts on the Desktop, in the Start menu and pinned to the taskbar
-  # (once per helper start; a second window needs only its own badge).
+  # (once per helper start; a second window needs only its own badge, and shortcuts made
+  # while the helper runs are stamped at its next start).
   if (-not $stamp) { return }
   $sh = New-Object -ComObject WScript.Shell
   $places = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'),
@@ -277,8 +286,7 @@ if (-not $listener) {
   $running = try { (Invoke-WebRequest "${prefix}__version" -UseBasicParsing -TimeoutSec 3).Content } catch { '' }
   if ("$running".Trim() -eq $version) {
     $k = try { [IO.File]::ReadAllText($keyFile).Trim() } catch { '' }
-    Open-Window $k
-    Start-WindowBadge -Wait
+    if (Open-Window $k) { Start-WindowBadge -Wait }
     exit
   }
   # Otherwise it is an older helper: stop it and take over.
@@ -294,8 +302,7 @@ if (-not $listener) {
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
 $key = New-Key
 [IO.File]::WriteAllText($keyFile, $key, $utf8)
-Open-Window $key
-Start-WindowBadge
+if (Open-Window $key) { Start-WindowBadge }
 $last = Get-Date
 $byeAt = $null
 $pages = @{}   # open Money Desk windows, by the id each page picks for itself

@@ -5,8 +5,8 @@ First time
 2. Open Money Desk from the Desktop or Start menu. It opens in its own
    window with no console. To pin it, right-click Money Desk in the Start
    menu, or right-click its taskbar button while it is open. Either way the
-   pin shows the Money Desk icon. (If you pinned it before and the pin shows
-   the Edge icon, unpin that one and pin it again.)
+   pin shows the Money Desk icon.
+   An older pin with the Edge icon: unpin it and pin Money Desk again.
 
 Close the window when you're done. The background helper stops with it.
 

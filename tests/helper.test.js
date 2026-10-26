@@ -8,7 +8,7 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const ps = fs.readFileSync(path.join(root, 'serve.ps1'), 'utf8');
 
-test('the taskbar badge points at files that exist and finds the window by the page title', () => {
+test('the taskbar badge names files that exist and the page title (a drift check, not a Windows test)', () => {
   for (const f of ['Money Desk.vbs', 'money-desk.ico']) {
     assert.ok(ps.includes(`'${f}'`), f);
     assert.ok(fs.existsSync(path.join(root, f)), f);
