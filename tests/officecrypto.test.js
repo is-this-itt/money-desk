@@ -83,3 +83,12 @@ test('missing values or a truncated package are reported as damaged, not as a wr
   XLSX.CFB.find(cfb2, 'EncryptedPackage').content = Buffer.from([1, 2, 3]);
   await assert.rejects(C.decrypt(XLSX.CFB, new Uint8Array(XLSX.CFB.write(cfb2, { type: 'array' })), 'test1234'), /damaged/);
 });
+
+test('a corrupted package that decrypts to garbage is reported as damaged', async () => {
+  for (const name of ['locked-agile.xlsx', 'locked-standard.xlsx']) {
+    const cfb = XLSX.CFB.read(load(name), { type: 'array' });
+    const pkg = XLSX.CFB.find(cfb, 'EncryptedPackage');
+    const c = Buffer.from(pkg.content); c[8] ^= 0xff; pkg.content = c;
+    await assert.rejects(C.decrypt(XLSX.CFB, new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' })), 'test1234'), /damaged/, name);
+  }
+});

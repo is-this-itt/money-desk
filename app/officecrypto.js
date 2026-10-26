@@ -228,9 +228,13 @@
     const s = streams(CFB, bytes);
     if (!s) throw new Error('Not an encrypted Office file');
     const major = s.info[0] | (s.info[1] << 8), minor = s.info[2] | (s.info[3] << 8);
-    if (major === 4 && minor === 4) return decryptAgile(s.info, s.pkg, password);
-    if ((major === 3 || major === 4) && minor === 2) return decryptStandard(s.info, s.pkg, password);
-    throw new Error(UNSUPPORTED);
+    let out;
+    if (major === 4 && minor === 4) out = await decryptAgile(s.info, s.pkg, password);
+    else if ((major === 3 || major === 4) && minor === 2) out = await decryptStandard(s.info, s.pkg, password);
+    else throw new Error(UNSUPPORTED);
+    // A right password always gives a zip (.xlsx); anything else means the file is damaged.
+    if (out && !(out.length >= 4 && out[0] === 0x50 && out[1] === 0x4b)) throw new Error(DAMAGED);
+    return out;
   }
 
   // sha1 and sha512 are exported only so the tests can compare them with Node's.
