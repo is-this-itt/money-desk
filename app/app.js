@@ -488,7 +488,7 @@
           <div class="drop mt" id="drop" tabindex="0" role="button" aria-label="Choose statement files">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6"><path d="M12 15V3m0 0L8 7m4-4 4 4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
             <div class="big">Drop statement files here, or click to choose</div>
-            <div class="muted small">.xlsx · .xls · .csv · .pdf (password-protected files are fine)</div>
+            <div class="muted small">.xlsx · .xls · .csv · .pdf (password-protected PDF and .xlsx files are fine)</div>
           </div>
           <div id="import-status" class="mt"></div>
           <div id="import-preview"></div>
@@ -876,6 +876,7 @@
 
   // ---------- Where to get files ----------
   // Official sites only. Links open in your normal browser; Money Desk itself never goes online.
+  // Every host here must also be in $linkHosts in serve.ps1 (a test checks this).
   const GUIDE = [
     ['Bank statements', 'Download once for a long date range, as Excel (XLS/XLSX) when offered.', [
       { name: 'SBI savings', what: 'Account statement, Excel', url: 'https://www.onlinesbi.sbi/', steps: ['Log in to SBI Online (Personal Banking).', 'My Accounts & Profile → Account Statement.', 'Choose a date range of up to 6 months or a year, then download as Excel.'] },
@@ -962,8 +963,8 @@
     }));
     // With the helper running, guide links open in your usual browser (Chrome when installed)
     // instead of the browser that hosts the app window.
-    root.querySelectorAll('a[data-ext]').forEach(a => (a.onclick = e => {
-      if (!fileMode) return;
+    root.querySelectorAll('a[data-ext]').forEach(a => (a.onclick = a.onauxclick = e => {
+      if (!fileMode || e.button > 1) return;
       e.preventDefault();
       fetch('/api/open', { method: 'POST', headers: { 'X-Money-Desk': HELPER_KEY, 'Content-Type': 'text/plain' }, body: a.href })
         .then(r => { if (!r.ok) throw new Error(r.status); })

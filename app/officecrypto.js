@@ -10,6 +10,7 @@
   // ---------- Hashes ----------
   // The key is derived by hashing up to 100,000 times. Web Crypto's digest is asynchronous and far
   // too slow for that, so SHA-1 and SHA-512 are implemented here; other hashes fall back to it.
+  // Lengths are kept in 32-bit integers, which is fine for these short key-derivation inputs.
   function sha1(msg) {
     const len = msg.length, words = new Int32Array((((len + 8) >> 6) + 1) * 16);
     for (let i = 0; i < len; i++) words[i >> 2] |= msg[i] << (24 - (i % 4) * 8);
@@ -136,12 +137,13 @@
 
   // ---------- File structure ----------
   const AES_KEY_BYTES = [16, 24, 32], MAX_SPIN = 1000000;
+  const DAMAGED = 'this locked file looks damaged. Download it again';
   const UNSUPPORTED = "this file uses a kind of password lock Money Desk can't open yet";
   // The decrypted size is stored as 8 bytes before the data; it can't be larger than the data.
   function packageSize(pkg) {
     const dv = new DataView(pkg.buffer, pkg.byteOffset, pkg.byteLength);
     const size = dv.getUint32(0, true);
-    if (dv.getUint32(4, true) !== 0 || size > pkg.length - 8) throw new Error('this locked file looks damaged. Download it again');
+    if (pkg.length < 8 || dv.getUint32(4, true) !== 0 || size > pkg.length - 8) throw new Error(DAMAGED);
     return size;
   }
   function streams(CFB, bytes) {
@@ -190,10 +192,14 @@
 
   async function decryptStandard(info, pkg, password) {
     const dv = new DataView(info.buffer, info.byteOffset, info.byteLength);
+    if (info.length < 12 + 32) throw new Error(DAMAGED);
     const headerSize = dv.getUint32(8, true), h0 = 12;
+    // The header, a 16-byte salt and the 16 + 32 byte verifier must all fit in the stream.
+    if (headerSize < 32 || h0 + headerSize + 4 > info.length) throw new Error(DAMAGED);
     const algId = dv.getUint32(h0 + 8, true), keyBits = dv.getUint32(h0 + 16, true);
     if (![0x660e, 0x660f, 0x6610].includes(algId) || !AES_KEY_BYTES.includes(keyBits / 8)) throw new Error(UNSUPPORTED);
     const v = h0 + headerSize, saltSize = dv.getUint32(v, true);
+    if (saltSize !== 16 || v + 56 + saltSize > info.length) throw new Error(DAMAGED);
     const salt = info.subarray(v + 4, v + 4 + saltSize);
     const encVerifier = info.subarray(v + 4 + saltSize, v + 20 + saltSize);
     const encVerifierHash = info.subarray(v + 24 + saltSize, v + 56 + saltSize);

@@ -57,3 +57,19 @@ test('file values that could hang or exhaust the page are refused', async () => 
   const c = Buffer.from(pkg.content); c.writeUInt32LE(0xffffff00, 0); pkg.content = c;
   await assert.rejects(C.decrypt(XLSX.CFB, new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' })), 'test1234'), /damaged/);
 });
+
+test('a truncated standard encryption header is reported as damaged', async () => {
+  const cfb = XLSX.CFB.read(load('locked-standard.xlsx'), { type: 'array' });
+  const info = XLSX.CFB.find(cfb, 'EncryptionInfo');
+  info.content = Buffer.from(info.content).subarray(0, 60);
+  await assert.rejects(C.decrypt(XLSX.CFB, new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' })), 'test1234'), /damaged/);
+});
+
+test('every guide link host can be opened by the helper', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'app', 'app.js'), 'utf8');
+  const ps = fs.readFileSync(path.join(__dirname, '..', 'serve.ps1'), 'utf8');
+  const guide = new Set([...app.matchAll(/url: '(https:\/\/[^']+)'/g)].map(m => new URL(m[1]).host));
+  const allowed = new Set([...(/\$linkHosts = @\(([\s\S]*?)\)/.exec(ps) || [])[1].matchAll(/'([^']+)'/g)].map(m => m[1]));
+  assert.ok(guide.size > 10);
+  assert.deepStrictEqual([...guide].sort(), [...allowed].sort());
+});
