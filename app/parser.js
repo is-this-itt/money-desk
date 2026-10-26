@@ -31,7 +31,7 @@
     { name: 'Card payments & transfers', kind: 'transfer', words: ['credit card payment', 'cc payment', 'card payment', 'payment received', 'payment - thank', 'thank you', 'cred club', 'dreamplug', 'cred ', 'autopay', 'self transfer', ' self ', 'own account', 'ac xfr from gl', 'sweep', 'cardbill', 'card bill', 'billdesk', 'sbicardp'] },
     { name: 'Salary', kind: 'income', words: ['salary', 'sal ', 'payroll', 'sal-', 'sal/', 'rzpx pvt ltd pa'] },
     { name: 'Interest & dividends', kind: 'income', words: ['interest credit', 'interes t credit', 'int.pd', 'int pd', 'int.coll', 'interest paid', 'sb interest', 'dividend', 'div '] },
-    { name: 'Refunds & cashback', kind: 'spend', words: ['refund', 'reversal', 'cashback', 'cash back', 'rev-', 'chargeback'] },
+    { name: 'Refunds & cashback', kind: 'spend', words: ['refund', 'reversal', 'cashback', 'cash back', 'rev-', 'upi/rev/', 'chargeback'] },
     { name: 'People (UPI)', kind: 'spend', words: [] },
     { name: 'Other', kind: 'spend', words: [] },
     { name: 'Other income', kind: 'income', words: [] },
@@ -172,6 +172,8 @@
     const d = clean(desc).slice(0, 300);
     let m = /^(?:WDL|DEP) TFR UPI\/(?:DR|CR)\/[^/]*\/([^/]*)\/[^/]*\/([^/]*)/i.exec(d);
     if (m) return { name: m[1].trim(), handle: m[2].replace(/\s+/g, '').toLowerCase(), upi: true };
+    // A failed UPI payment comes back as "DEP TFR UPI/REV/<ref> ..." with no payee.
+    if (/^(?:WDL|DEP) TFR UPI\/REV\//i.test(d)) return { name: 'UPI reversal', handle: '', upi: false };
     m = /^DEP TFR (?:NEFT|IMPS|RTGS)\*[^*]*\*[^*]*\*(.*?)(?:\s+(?:X{4,}\d{4}|\d{8,}))?(?:\s+AT\s+\d+\b.*)?$/i.exec(d);
     // The payer's name starts right after a cut, so its first letter stands alone ("A XIS MUTUAL").
     if (m) return { name: m[1].replace(/^([a-z]) (?=[a-z]{2})/i, '$1').trim(), handle: '', upi: false };
@@ -714,7 +716,7 @@
     return lines.join('\n');
   }
 
-  const PARSER_VERSION = 7;
+  const PARSER_VERSION = 8;
   const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;

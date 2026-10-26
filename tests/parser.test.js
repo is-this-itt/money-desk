@@ -372,3 +372,10 @@ test('reading check: layouts keep only bank words, counts flag unread and unmask
   assert.strictEqual(MD.readingReportText([]), text.split('\n')[0]);
   assert.strictEqual(MD.lineShape('BILL PAYMENT'), 'a PAYMENT');
 });
+
+test('SBI UPI reversals are refunds', () => {
+  const t = MD.makeTxn({ date: '2026-05-01', desc: 'DEP TFR UPI/REV/612345678901 00000012345678901 AT 04321 TESTPUR', amount: 250, account: 'S', accountKind: 'bank', rules: {} });
+  assert.strictEqual(t.merchant, 'UPI Reversal');
+  assert.strictEqual(t.category, 'Refunds & cashback');
+  assert.ok(!/612345678901/.test(t.desc));
+});
