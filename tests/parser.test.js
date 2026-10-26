@@ -129,3 +129,27 @@ test('service type words match whole words only', () => {
   assert.deepStrictEqual(['Debit card', 'card', 'FD', 'Mutual funds', 'NACH', 'self-drive', 'offday'].map(type),
     ['Bank account', 'Credit card', 'SIP / investment', 'SIP / investment', 'Mandate / autopay', 'Other', 'Other']);
 });
+
+test('service frequency accepts plain words and flags anything ambiguous', () => {
+  const read = f => { const r = MD.readServiceRows([['Name', 'How often'], ['x', f]]).rows[0]; return r.problems.length ? 'problem' : r.value.freq; };
+  assert.deepStrictEqual(['Monthly', 'every  month', 'Annual', 'p.a.', 'One-time', 'once', 'Quarterly', 'none', ''].map(read),
+    ['Monthly', 'Monthly', 'Yearly', 'Yearly', 'One-time', 'One-time', 'Quarterly', 'None', 'None']);
+  assert.deepStrictEqual(['Bi-monthly', 'Every 2 months', 'Half-yearly', 'Biannual', 'Money', 'Phone'].map(read), Array(6).fill('problem'));
+});
+
+test('service status, amount and day formats, and duplicate keys', () => {
+  const rows = MD.readServiceRows([
+    ['Name', 'Amount', 'Day', 'Status'],
+    ['a', 'Rs 649', new Date(2026, 9, 18), 'Active'],
+    ['b', 'INR 1,200.50', '', 'Closed'],
+    ['c', '', '', 'paused'],
+    ['d', '', '', 'yes'],
+  ]).rows;
+  assert.deepStrictEqual(rows.map(r => [r.value.amount, r.value.day, r.value.active, r.problems]), [
+    [649, 18, true, []], [1200.5, null, false, []], ['', null, true, ['Status must be Active or Stopped']], ['', null, true, []],
+  ]);
+  const base = { type: 'Subscription', name: 'Netflix', last4: '', amount: 649, day: 5 };
+  assert.strictEqual(MD.serviceKey(base), MD.serviceKey({ ...base, name: 'NETFLIX ' }));
+  assert.notStrictEqual(MD.serviceKey(base), MD.serviceKey({ ...base, amount: 199 }));
+  assert.strictEqual(MD.serviceKey({ ...base, amount: null, day: null }), MD.serviceKey({ ...base, amount: '', day: null }));
+});

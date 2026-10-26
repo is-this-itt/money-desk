@@ -396,10 +396,10 @@
   const SVC_FREQ = ['Monthly', 'Quarterly', 'Yearly', 'One-time', 'None'];
   const SVC_COLUMNS = ['Type', 'Name', 'Bank or provider', 'Last 4 digits', 'Amount', 'How often', 'Day', 'Paid from', 'Notes', 'Status'];
   const SVC_HEADERS = {
-    type: ['type', 'kind', 'category'], name: ['name', 'service', 'service name'],
+    type: ['type', 'kind'], name: ['name', 'service', 'service name'],
     provider: ['bank or provider', 'provider', 'bank', 'company'], last4: ['last 4 digits', 'last 4', 'last4', 'last four'],
     amount: ['amount', 'amount (₹)', 'amount rs', 'price', 'emi', 'premium'], freq: ['how often', 'frequency', 'billing', 'cycle'],
-    day: ['day', 'bill or debit day', 'debit day', 'bill day', 'due day', 'date'], from: ['paid from', 'from', 'debited from', 'account'],
+    day: ['day', 'bill or debit day', 'debit day', 'bill day', 'due day'], from: ['paid from', 'debited from'],
     notes: ['notes', 'note', 'remarks', 'comments'], status: ['status', 'active'],
   };
   const TYPE_WORDS = [
@@ -409,7 +409,10 @@
     ['Insurance', /\binsur|\bpolicy\b|\blic\b/], ['Loan / EMI', /\bloans?\b|\bemis?\b/],
     ['Subscription', /\bsubscri|\bott\b|\bmembership\b/], ['Other', /\bother\b/],
   ];
-  const FREQ_WORDS = [['Monthly', /month/], ['Quarterly', /quarter/], ['Yearly', /year|annual/], ['One-time', /one|once/], ['None', /^(none|-|na|n\/a)$/]];
+  const FREQ_WORDS = [
+    ['Monthly', /^(monthly|every month|per month|a month|month|pm|p\.m\.)$/], ['Quarterly', /^(quarterly|every 3 months|every quarter|quarter)$/],
+    ['Yearly', /^(yearly|annual|annually|every year|per year|a year|year|pa|p\.a\.)$/], ['One-time', /^(one[- ]?time|once)$/], ['None', /^(none|-|na|n\/a)$/],
+  ];
   const normHead = h => String(h == null ? '' : h).toLowerCase().replace(/\s+/g, ' ').trim();
 
   // Reads rows (arrays of cells) from a filled-in template. Returns one entry per non-empty row:
@@ -437,7 +440,7 @@
       v.type = SVC_TYPES.find(x => x.toLowerCase() === t) || (t && (TYPE_WORDS.find(([, re]) => re.test(t)) || [])[0]) || '';
       if (!v.type) { v.type = 'Other'; if (t) notes.push(`Type "${redactDesc(text('type').slice(0, 30))}" saved as Other`); }
 
-      const f = text('freq').toLowerCase();
+      const f = text('freq').toLowerCase().replace(/\s+/g, ' ');
       v.freq = SVC_FREQ.find(x => x.toLowerCase() === f) || (f && (FREQ_WORDS.find(([, re]) => re.test(f)) || [])[0]) || 'None';
       if (f && !FREQ_WORDS.some(([, re]) => re.test(f))) problems.push(`"How often" must be ${SVC_FREQ.join(', ')}`);
 
@@ -466,13 +469,16 @@
 
       const st = text('status').toLowerCase();
       if (/^(stopped|stop|inactive|closed|cancell?ed|no|false|0)$/.test(st)) v.active = false;
+      else if (st && !/^(active|yes|true|1|on)$/.test(st)) problems.push('Status must be Active or Stopped');
       out.push({ row: i + 1, value: v, problems, notes });
     }
     return { rows: out };
   }
+  // Two entries are the same service when type, name, last 4 digits, amount and day all match.
+  const serviceKey = v => [v.type, merchantKey(v.name), v.last4, v.amount == null || v.amount === '' ? '' : Number(v.amount), v.day || ''].join('|');
 
   const PARSER_VERSION = 4;
-  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows };
+  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);

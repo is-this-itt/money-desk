@@ -717,7 +717,7 @@
       : `<div class="card empty mt">
           <svg width="56" height="56" viewBox="0 0 64 64" fill="none"><rect x="8" y="14" width="48" height="36" rx="7" fill="var(--accent-soft)"/><path d="M8 26h48M18 40h12" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/></svg>
           <h2>Keep every service in one place</h2>
-          <p>Add your bank accounts, cards, subscriptions, autopay mandates, SIPs, insurance and loans one by one, or fill in a spreadsheet and import them all at once.${sugg.length ? ` ${sugg.length} suggestions from your statements are ready to add.` : ''}</p>
+          <p>Add your accounts, cards, subscriptions, mandates, SIPs, insurance and loans, or import them all from a spreadsheet.${sugg.length ? ` ${sugg.length} suggestions from your statements are ready to add.` : ''}</p>
           <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn primary" data-act="svc-new">Add a service</button><button class="btn" data-act="svc-import">Import from Excel</button>${sugg.length ? `<button class="btn" data-svc-tab="suggestions">See suggestions</button>` : ''}</div>
         </div>`;
     const suggestions = `<div class="card mt"><p class="muted" style="margin-top:0">Found in your statements. Check the details before adding: the amount is the typical monthly payment.</p>
@@ -802,7 +802,7 @@
       ['Type', 'No', SVC_TYPES.join(', ') + '. Left empty, it is saved as Other.'],
       ['Name', 'Yes', 'What you call it, e.g. Netflix, HDFC Regalia, SBI Savings.'],
       ['Bank or provider', 'No', 'e.g. HDFC, Groww, LIC.'],
-      ['Last 4 digits', 'No', 'Only the last 4 digits of a card or account. Never the full number.'],
+      ['Last 4 digits', 'No', 'Only the last 4 digits of a card or account. Never the full number. In a CSV file, type all 4 digits, e.g. 0123.'],
       ['Amount', 'No', 'Rupees, e.g. 649.'],
       ['How often', 'No', SVC_FREQ.join(', ') + '.'],
       ['Day', 'No', 'Day of the month it is billed or debited, 1 to 31.'],
@@ -826,8 +826,6 @@
     return MD.readServiceRows(XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' }));
   }
 
-  const serviceKey = v => [v.type, MD.merchantKey(v.name), v.last4].join('|');
-
   function serviceImportDialog() {
     let ready = [];
     const d = openDialog({
@@ -846,10 +844,12 @@
       foot: `<span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-imp-go disabled>Import</button>`,
     });
     const go = d.querySelector('[data-imp-go]'), input = d.querySelector('[data-imp-input]'), result = d.querySelector('[data-imp-result]');
+    d.querySelector('[data-imp-pick]').focus();
     d.querySelector('[data-imp-template]').onclick = serviceTemplate;
     d.querySelector('[data-imp-pick]').onclick = () => input.click();
+    let reading = 0;
     input.onchange = async () => {
-      const f = input.files[0];
+      const f = input.files[0], mine = ++reading;
       input.value = '';
       if (!f) return;
       d.querySelector('[data-imp-name]').textContent = f.name;
@@ -857,17 +857,20 @@
       ready = []; go.disabled = true; go.textContent = 'Import';
       let res;
       try { res = await readServiceFile(f); } catch (e) { res = { error: "Couldn't read this file. Save it as .xlsx or .csv and try again." }; }
+      if (mine !== reading) return; // a newer file was chosen while this one was being read
       if (res.error) { result.innerHTML = `<div class="note err mt">${esc(res.error)}</div>`; return; }
       if (!res.rows.length) { result.innerHTML = `<div class="note mt">The file has no rows under the column names yet.</div>`; return; }
       const str = (x, max) => String(x == null ? '' : x).slice(0, max);
-      const have = new Set(db.services.map(serviceKey)), seen = new Set();
+      const have = new Set(db.services.map(MD.serviceKey)), seen = new Set();
       let dup = 0, bad = 0;
       const lines = res.rows.map(r => {
-        let status, cls;
+        let status, cls = '';
         const v = r.problems.length ? null : cleanService(r.value, str);
+        const key = v && MD.serviceKey(v);
         if (!v) { status = r.problems.join('. ') || 'Name is empty'; cls = 'bad'; bad++; }
-        else if (have.has(serviceKey(v)) || seen.has(serviceKey(v))) { status = have.has(serviceKey(v)) ? 'Already on your list' : 'Repeats an earlier row'; cls = ''; dup++; }
-        else { seen.add(serviceKey(v)); ready.push(v); status = ['Ready'].concat(r.notes).join('. '); cls = 'ok'; }
+        else if (have.has(key)) { status = 'Already on your list'; dup++; }
+        else if (seen.has(key)) { status = 'Repeats an earlier row'; dup++; }
+        else { seen.add(key); ready.push(v); status = ['Ready'].concat(r.notes).join('. '); cls = 'ok'; }
         const shown = v || r.value;
         return `<tr><td class="small muted num">${r.row}</td><td><b>${esc(MD.redactDesc(str(shown.name, 80))) || '<span class="muted">—</span>'}</b><div class="small muted">${esc(shown.type)}</div></td>
           <td class="small">${v ? serviceWhen(v) : ''}</td><td><span class="pill ${cls}">${esc(status)}</span></td></tr>`;
