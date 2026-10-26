@@ -18,6 +18,7 @@
   --text-3: #7a7974;
   --accent: #2a78d6;
   --accent-soft: #e3eefb;
+  --accent-text: #1d5fae;
   --side: #fbfbfa;
   --side-text: #52514e;
   --side-muted: #8a8984;
@@ -39,7 +40,7 @@
   color-scheme: dark;
   --bg: #111110; --surface: #1a1a19; --surface-2: #242422; --line: #2f2f2c;
   --text: #f0efec; --text-2: #c3c2b7; --text-3: #8e8d86;
-  --accent: #3987e5; --accent-soft: #1d2d42;
+  --accent: #3987e5; --accent-soft: #1d2d42; --accent-text: #7db0ee;
   --side: #0c0c0b; --side-text: #b5b4ad; --side-muted: #8b8c88; --side-hover: #1d1d1b; --side-active: #222220; --side-active-text: #fff; --brand-text: #fff;
   --spend: #d95926; --income: #3987e5; --invest: #199e70;
   --good-text: #4cc24c; --crit-soft: #3a1d1d;
@@ -191,6 +192,16 @@ select { cursor: pointer; }
 /* Dialogs */
 dialog.dlg { border: 0; padding: 0; border-radius: 16px; background: var(--surface); color: var(--text); width: min(560px, calc(100vw - 32px)); box-shadow: 0 24px 64px rgba(0,0,0,.28); }
 dialog.dlg.sm { width: min(420px, calc(100vw - 32px)); }
+dialog.dlg.lg { width: min(820px, calc(100vw - 32px)); }
+.imp-steps { margin: 0 0 14px; padding-left: 20px; }
+.imp-steps li { margin-bottom: 6px; }
+.imp-file { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.imp-file .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.imp-table { max-height: 300px; overflow: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.imp-table .list th { position: sticky; top: 0; background: var(--surface); padding-top: 8px; }
+.pill.ok { background: var(--accent-soft); color: var(--accent-text); }
+.pill.bad { background: var(--crit-soft); color: var(--crit); }
+.imp-table .pill { white-space: normal; }
 dialog.dlg::backdrop { background: rgba(15, 15, 14, .45); }
 .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px 6px; }
 .dlg-head h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }

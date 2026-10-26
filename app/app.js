@@ -15,8 +15,7 @@
   const fmtDate = d => { const [y, m, dd] = String(d).split('-'); return esc(`${+dd} ${MON[+m - 1]} ${y}`); };
   const monthLabel = ym => { const [y, m] = String(ym).split('-'); return esc(`${MON[+m - 1]} ${String(y).slice(2)}`); };
   const kindOf = cat => (MD.CAT_BY_NAME[cat] || { kind: 'spend' }).kind;
-  const SVC_TYPES = ['Bank account', 'Credit card', 'Subscription', 'Mandate / autopay', 'SIP / investment', 'Insurance', 'Loan / EMI', 'Other'];
-  const SVC_FREQ = ['Monthly', 'Quarterly', 'Yearly', 'One-time', 'None'];
+  const SVC_TYPES = MD.SVC_TYPES, SVC_FREQ = MD.SVC_FREQ;
   const PER_MONTH = { Monthly: 1, Quarterly: 1 / 3, Yearly: 1 / 12 };
   const newId = () => (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).slice(0, 20);
 
@@ -718,14 +717,15 @@
       : `<div class="card empty mt">
           <svg width="56" height="56" viewBox="0 0 64 64" fill="none"><rect x="8" y="14" width="48" height="36" rx="7" fill="var(--accent-soft)"/><path d="M8 26h48M18 40h12" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/></svg>
           <h2>Keep every service in one place</h2>
-          <p>Add your bank accounts, cards, subscriptions, autopay mandates, SIPs, insurance and loans.${sugg.length ? ` ${sugg.length} suggestions from your statements are ready to add.` : ''}</p>
-          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn primary" data-act="svc-new">Add a service</button>${sugg.length ? `<button class="btn" data-svc-tab="suggestions">See suggestions</button>` : ''}</div>
+          <p>Add your accounts, cards, subscriptions, mandates, SIPs, insurance and loans, or import them all from a spreadsheet.${sugg.length ? ` ${sugg.length} suggestions from your statements are ready to add.` : ''}</p>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn primary" data-act="svc-new">Add a service</button><button class="btn" data-act="svc-import">Import from Excel</button>${sugg.length ? `<button class="btn" data-svc-tab="suggestions">See suggestions</button>` : ''}</div>
         </div>`;
     const suggestions = `<div class="card mt"><p class="muted" style="margin-top:0">Found in your statements. Check the details before adding: the amount is the typical monthly payment.</p>
         <table class="list"><thead><tr><th>Name</th><th>Type</th><th class="r">Typical amount</th><th></th></tr></thead><tbody>${sugg.map((x, i) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.why)}</div></td><td><span class="pill">${esc(x.type)}</span></td><td class="r num">${x.amount ? money(x.amount) + ' a month' : '<span class="muted">—</span>'}</td><td class="r"><button class="btn small" data-svc-sugg="${i}">Review and add</button></td></tr>`).join('')}</tbody></table></div>`;
     return `
       <div class="top"><div><h1>My services</h1><div class="sub">Accounts, cards, subscriptions, mandates, SIPs and policies, in one list on this laptop</div></div>
-        <button class="btn primary" data-act="svc-new"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>Add a service</button></div>
+        <div style="display:flex;gap:8px"><button class="btn" data-act="svc-import"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11M7 10l5 5 5-5M5 19h14"/></svg>Import from Excel</button>
+        <button class="btn primary" data-act="svc-new"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>Add a service</button></div></div>
       <div class="grid kpis">
         <div class="card kpi"><div class="label">Active</div><div class="value num">${active.length}</div><div class="delta">${db.services.length - active.length ? `${db.services.length - active.length} stopped` : ''}</div></div>
         <div class="card kpi"><div class="label">Regular payments a month</div><div class="value num">${money(monthly)}</div><div class="delta">Subscriptions, mandates, SIPs, insurance, EMIs</div></div>
@@ -788,6 +788,73 @@
       d.close();
       if (!(await confirmDialog('Delete service?', `"${v.name}" will be removed from My services. Your transactions are not affected.`, 'Delete', true))) return;
       db.services = db.services.filter(x => x.id !== v.id); save(); render();
+    };
+  }
+
+  // ---------- Import services from a spreadsheet ----------
+  function serviceTemplate() {
+    const bytes = XLSX.write(MD.serviceTemplateBook(XLSX), { bookType: 'xlsx', type: 'array' });
+    download('money-desk-services-template.xlsx', bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  }
+
+  async function readServiceFile(f) {
+    const csv = /\.csv$/i.test(f.name);
+    return MD.readServiceBook(XLSX, csv ? await f.text() : new Uint8Array(await f.arrayBuffer()), csv);
+  }
+
+  function serviceImportDialog() {
+    let ready = [];
+    const d = openDialog({
+      title: 'Import services', size: 'lg',
+      body: `<ol class="imp-steps">
+          <li>Download the template and open it in Excel or Google Sheets. The second sheet explains each column.</li>
+          <li>Add one row per service: accounts, cards, subscriptions, mandates, SIPs, insurance and loans.</li>
+          <li>Save it and choose the file here. You'll see every row before anything is added.</li>
+        </ol>
+        <div class="imp-file"><span class="name muted" data-imp-name>No file chosen</span>
+          <button class="btn small" data-imp-template>Download template</button>
+          <button class="btn small primary" data-imp-pick>Choose file</button>
+          <input type="file" accept=".xlsx,.xls,.csv" hidden data-imp-input></div>
+        <div data-imp-result></div>
+        <p class="small muted" style="margin:12px 0 0">Don't put passwords, PINs or CVVs in the file. Long numbers in any column are masked when imported, and rows already on your list are skipped.</p>`,
+      foot: `<span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-imp-go disabled>Import</button>`,
+    });
+    const go = d.querySelector('[data-imp-go]'), input = d.querySelector('[data-imp-input]'), result = d.querySelector('[data-imp-result]');
+    d.querySelector('[data-imp-pick]').focus();
+    d.querySelector('[data-imp-template]').onclick = serviceTemplate;
+    d.querySelector('[data-imp-pick]').onclick = () => input.click();
+    let reading = 0;
+    input.onchange = async () => {
+      const f = input.files[0], mine = ++reading;
+      input.value = '';
+      if (!f) return;
+      d.querySelector('[data-imp-name]').textContent = f.name;
+      d.querySelector('[data-imp-name]').classList.remove('muted');
+      ready = []; go.disabled = true; go.textContent = 'Import';
+      result.innerHTML = '<p class="muted" style="margin:14px 0 0">Reading the file…</p>';
+      let res;
+      try { res = await readServiceFile(f); } catch (e) { console.error(e); res = { error: "Couldn't read this file. Save it as .xlsx or .csv and try again." }; }
+      if (mine !== reading) return; // a newer file was chosen while this one was being read
+      if (res.error) { result.innerHTML = `<div class="note err mt">${esc(res.error)}</div>`; return; }
+      if (!res.rows.length) { result.innerHTML = `<div class="note mt">The file has no rows under the column names yet.</div>`; return; }
+      const str = (x, max) => String(x == null ? '' : x).slice(0, max);
+      const plan = MD.planServiceImport(res.rows, db.services, v => cleanService(v, str));
+      ready = plan.ready;
+      const { dup, bad } = plan;
+      const lines = plan.lines.map(l => `<tr><td class="small muted num">${l.row}</td><td><b>${esc(MD.redactDesc(str(l.value.name, 80))) || '<span class="muted">—</span>'}</b><div class="small muted">${esc(l.value.type)}</div></td>
+          <td class="small">${l.saved ? serviceWhen(l.value) : ''}</td><td><span class="pill ${l.kind === 'dup' ? '' : l.kind}">${esc(l.status)}</span></td></tr>`);
+      const parts = [`<b>${ready.length}</b> ready to add`, dup && `${dup} skipped as duplicates`, bad && `${bad} need fixing in the file`].filter(Boolean);
+      result.innerHTML = `<p style="margin:14px 0 0">${parts.join(' · ')}</p>
+        <div class="imp-table"><table class="list"><thead><tr><th>Row</th><th>Name</th><th>Amount and date</th><th>Status</th></tr></thead><tbody>${lines.join('')}</tbody></table></div>`;
+      go.disabled = !ready.length;
+      go.textContent = ready.length ? `Import ${ready.length} service${ready.length === 1 ? '' : 's'}` : 'Import';
+    };
+    go.onclick = () => {
+      if (!ready.length) return;
+      db.services.push(...ready);
+      prefs.svcTab = 'mine';
+      save(); savePrefs(); d.close(); render();
+      toast(`Added ${ready.length} service${ready.length === 1 ? '' : 's'}.`);
     };
   }
 
@@ -930,6 +997,7 @@
 
   function act(a) {
     if (a === 'svc-new') serviceDialog({});
+    else if (a === 'svc-import') serviceImportDialog();
     else if (a === 'load-sample') {
       const sample = window.MDSample.build(MD, new Date());
       const have = new Set(db.txns.map(t => t.id));

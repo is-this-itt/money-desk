@@ -96,3 +96,141 @@ test('Dates: Indian day-first formats and Excel serials', () => {
   assert.strictEqual(MD.parseDate(46300), '2026-10-05');
   assert.strictEqual(MD.parseDate('31/02/2026'), null);
 });
+
+test('services template rows: aliases, padding, masking hints and problems', () => {
+  const rows = [
+    ['My list'], [],
+    ['Type', 'Name', 'Bank or provider', 'Last 4 digits', 'Amount', 'How often', 'Day', 'Paid from', 'Notes', 'Status'],
+    ['subscription', 'Netflix', '', '', '649', 'monthly', '5th', 'HDFC card', '', ''],
+    ['card', 'ICICI Amazon Pay', 'ICICI', 123, '', '', 18, '', '', 'Active'],
+    ['SIP', 'Groww SIP', 'Groww', '', '₹5,000', 'Monthly', '7', 'SBI Savings', '', 'stopped'],
+    ['Bank account', 'Kotak Savings', 'Kotak', '1234567890123456', '', 'None', '', '', '', ''],
+    ['', '', '', '', '', '', '', '', '', ''],
+    ['Insurance', '', 'LIC', '', 'abc', 'fortnightly', '40', '', '', ''],
+    ['Gadget', 'Something', '', '12a4', '', '', '', '', '', ''],
+  ];
+  const { rows: out } = MD.readServiceRows(rows);
+  assert.strictEqual(out.length, 6);
+  assert.deepStrictEqual(out[0].value, { name: 'Netflix', provider: '', from: 'HDFC card', notes: '', active: true, type: 'Subscription', freq: 'Monthly', last4: '', amount: 649, day: 5 });
+  assert.deepStrictEqual([out[1].value.type, out[1].value.last4, out[1].value.day], ['Credit card', '0123', 18]);
+  assert.deepStrictEqual([out[2].value.type, out[2].value.amount, out[2].value.active], ['SIP / investment', 5000, false]);
+  assert.deepStrictEqual([out[3].value.last4, out[3].notes], ['3456', ['Kept only the last 4 digits']]);
+  assert.strictEqual(out[4].row, 9);
+  assert.deepStrictEqual(out[4].problems, ['Name is empty', '"How often" must be Monthly, Quarterly, Yearly, One-time, None', 'Amount must be a number, like 649', 'Day must be between 1 and 31']);
+  assert.deepStrictEqual([out[5].value.type, out[5].notes, out[5].problems], ['Other', ['Type "Gadget" saved as Other'], ['Last 4 digits must be 4 numbers']]);
+});
+
+test('services sheet without a Name column is rejected', () => {
+  assert.ok(MD.readServiceRows([['Date', 'Amount'], ['1 Oct', '5']]).error);
+});
+
+test('service type words match whole words only', () => {
+  const type = t => MD.readServiceRows([['Type', 'Name'], [t, 'x']]).rows[0].value.type;
+  assert.deepStrictEqual(['Debit card', 'card', 'FD', 'Mutual funds', 'NACH', 'self-drive', 'offday'].map(type),
+    ['Bank account', 'Credit card', 'SIP / investment', 'SIP / investment', 'Mandate / autopay', 'Other', 'Other']);
+});
+
+test('service frequency accepts plain words and flags anything ambiguous', () => {
+  const read = f => { const r = MD.readServiceRows([['Name', 'How often'], ['x', f]]).rows[0]; return r.problems.length ? 'problem' : r.value.freq; };
+  assert.deepStrictEqual(['Monthly', 'every  month', 'Annual', 'p.a.', 'One-time', 'once', 'Quarterly', 'none', ''].map(read),
+    ['Monthly', 'Monthly', 'Yearly', 'Yearly', 'One-time', 'One-time', 'Quarterly', 'None', 'None']);
+  assert.deepStrictEqual(['Bi-monthly', 'Every 2 months', 'Half-yearly', 'Biannual', 'Money', 'Phone'].map(read), Array(6).fill('problem'));
+});
+
+test('service status, amount and day formats, and duplicate keys', () => {
+  const rows = MD.readServiceRows([
+    ['Name', 'Amount', 'Day', 'Status'],
+    ['a', 'Rs 649', new Date(2026, 9, 18), 'Active'],
+    ['b', 'INR 1,200.50', '', 'Closed'],
+    ['c', '', '', 'paused'],
+    ['d', '', '', 'yes'],
+  ]).rows;
+  assert.deepStrictEqual(rows.map(r => [r.value.amount, r.value.day, r.value.active, r.problems]), [
+    [649, 18, true, []], [1200.5, null, false, []], ['', null, true, ['Status must be Active or Stopped']], ['', null, true, []],
+  ]);
+  const base = { type: 'Subscription', name: 'Netflix', last4: '', amount: 649, day: 5 };
+  assert.strictEqual(MD.serviceKey(base), MD.serviceKey({ ...base, name: 'NETFLIX ' }));
+  assert.notStrictEqual(MD.serviceKey(base), MD.serviceKey({ ...base, amount: 199 }));
+  assert.strictEqual(MD.serviceKey({ ...base, amount: null, day: null }), MD.serviceKey({ ...base, amount: '', day: null }));
+});
+
+test('service types: specific words win over account/card, guesses are noted', () => {
+  const r = t => MD.readServiceRows([['Type', 'Name'], [t, 'x']]).rows[0];
+  assert.deepStrictEqual(['Home loan account', 'PPF account', 'Mutual fund account', 'Health insurance card', 'Salary account'].map(t => r(t).value.type),
+    ['Loan / EMI', 'SIP / investment', 'SIP / investment', 'Insurance', 'Bank account']);
+  assert.deepStrictEqual(r('Home loan account').notes, ['Type read as Loan / EMI']);
+  assert.deepStrictEqual(r('Insurance').notes, []);
+  assert.deepStrictEqual(r('').notes, []);
+});
+
+test('services header row needs Name plus another known column; amount 0 and row cap', () => {
+  const res = MD.readServiceRows([['Service'], ['Name', 'Amount'], ['Netflix', 0]]);
+  assert.deepStrictEqual(res.rows.map(r => [r.row, r.value.name, r.problems]), [[3, 'Netflix', ['Amount must be more than 0']]]);
+  assert.ok(MD.readServiceRows([['Name']]).error);
+  const many = [['Name', 'Amount']].concat(Array.from({ length: 1001 }, (_, i) => ['s' + i, 1]));
+  assert.match(MD.readServiceRows(many).error, /more than 1000 rows/);
+});
+
+test('planServiceImport sorts rows into ready, duplicate and problem', () => {
+  const existing = [{ type: 'Subscription', name: 'Netflix', last4: '', amount: 649, day: 5, active: false }];
+  const { rows } = MD.readServiceRows([
+    ['Type', 'Name', 'Amount', 'Day'],
+    ['Subscription', 'NETFLIX', 649, 5], // same as a stopped saved service
+    ['Subscription', 'Spotify', 119, 1],
+    ['Subscription', 'spotify ', 119, 1], // repeats the row above
+    ['Subscription', 'Card 4111111111111111', 10, 1],
+    ['Subscription', '', 10, 1],
+  ]);
+  const clean = v => (v.name ? { ...v, name: MD.redactDesc(v.name), amount: v.amount === '' ? null : v.amount } : null);
+  const plan = MD.planServiceImport(rows, existing, clean);
+  assert.deepStrictEqual(plan.lines.map(l => [l.row, l.kind, l.status]), [
+    [2, 'dup', 'Already on your list'], [3, 'ok', 'Ready'], [4, 'dup', 'Repeats an earlier row'], [5, 'ok', 'Ready'], [6, 'bad', 'Name is empty'],
+  ]);
+  assert.deepStrictEqual(plan.ready.map(v => v.name), ['Spotify', 'Card XXXXXXXXXXXX1111']);
+  assert.deepStrictEqual([plan.dup, plan.bad], [2, 1]);
+  // a masked name matches the same masked name already saved
+  assert.strictEqual(MD.planServiceImport(rows.slice(3, 4), plan.ready, clean).dup, 1);
+});
+
+test('readServiceBook keeps CSV leading zeros and prefers the Services sheet', () => {
+  const XLSX = require('../app/vendor/xlsx.full.min.js');
+  const csv = MD.readServiceBook(XLSX, 'Name,Last 4 digits\nICICI card,0123\n', true);
+  assert.strictEqual(csv.rows[0].value.last4, '0123');
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Notes'], ['ignore me']]), 'Read me');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Name', 'Last 4 digits'], ['ICICI card', 123]]), 'Services');
+  const xlsx = MD.readServiceBook(XLSX, new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' })), false);
+  assert.deepStrictEqual(xlsx.rows.map(r => [r.value.name, r.value.last4]), [['ICICI card', '0123']]);
+});
+
+test('services: a long number typed in Excel is a problem, row numbers follow the sheet', () => {
+  const r = MD.readServiceRows([['Name', 'Last 4 digits'], ['card', 4111111111111110], ['card', '4111111111111111']], 3).rows;
+  assert.deepStrictEqual(r.map(x => [x.row, x.value.last4, x.problems]), [
+    [4, undefined, ['Last 4 digits: type only the last 4 (Excel changes long numbers)']], [5, '1111', []],
+  ]);
+  const XLSX = require('../app/vendor/xlsx.full.min.js');
+  const ws = XLSX.utils.aoa_to_sheet([['Name', 'Amount'], ['Netflix', 649]], { origin: 'B3' });
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Services');
+  const res = MD.readServiceBook(XLSX, new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' })), false);
+  assert.deepStrictEqual(res.rows.map(x => [x.row, x.value.name]), [[4, 'Netflix']]);
+});
+
+test('the downloadable template reads back cleanly and keeps Last 4 as text', () => {
+  const XLSX = require('../app/vendor/xlsx.full.min.js');
+  const wb = MD.serviceTemplateBook(XLSX);
+  assert.deepStrictEqual(wb.SheetNames, ['Services', 'How to fill']);
+  const bytes = new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' }));
+  assert.deepStrictEqual(MD.readServiceBook(XLSX, bytes, false), { rows: [] });
+  const back = XLSX.read(bytes, { type: 'array', cellNF: true }).Sheets.Services;
+  assert.strictEqual(back.D2.z, '@');
+  // every template column is recognised as a header
+  XLSX.utils.sheet_add_aoa(wb.Sheets.Services, [['Bank account', 'Savings', 'HDFC', '0123', 1, 'None', 1, 'x', 'y', 'Active']], { origin: 'A2' });
+  const filled = MD.readServiceBook(XLSX, new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' })), false);
+  assert.deepStrictEqual(filled.rows[0].value, { name: 'Savings', provider: 'HDFC', from: 'x', notes: 'y', active: true, type: 'Bank account', freq: 'None', last4: '0123', amount: 1, day: 1 });
+});
+
+test('service key includes the provider; short numeric last 4 has the plain message', () => {
+  const a = { type: 'Bank account', name: 'Savings', provider: 'HDFC', last4: '', amount: null, day: null };
+  assert.notStrictEqual(MD.serviceKey(a), MD.serviceKey({ ...a, provider: 'SBI' }));
+  assert.deepStrictEqual(MD.readServiceRows([['Name', 'Last 4 digits'], ['x', 12345]]).rows[0].problems, ['Last 4 digits must be 4 numbers']);
+});
