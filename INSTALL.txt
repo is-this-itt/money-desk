@@ -3,8 +3,10 @@ Money Desk: a private dashboard for your bank and card statements
 First time
 1. Double-click "Add to Desktop and Start menu.vbs".
 2. Open Money Desk from the Desktop or Start menu. It opens in its own
-   window with no console. Right-click it in the Start menu to pin it to
-   the taskbar.
+   window with no console. To pin it, right-click Money Desk in the Start
+   menu, or right-click its taskbar button while it is open. Either way the
+   pin shows the Money Desk icon. (If you pinned it before and the pin shows
+   the Edge icon, unpin that one and pin it again.)
 
 Close the window when you're done. The background helper stops with it.
 
