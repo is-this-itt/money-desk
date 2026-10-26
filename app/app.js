@@ -690,20 +690,9 @@
   // ---------- Reading check ----------
   // The copied text names accounts by number and kind only, since account names are typed by you
   // and could hold a name or card digits.
-  function readingReportText(rep) {
-    const lines = ['Money Desk reading check: line layouts and counts only (no names, numbers, amounts, dates or account names)'];
-    rep.forEach((a, i) => {
-      const kind = (db.accounts[a.account] || {}).kind === 'card' ? 'credit card' : 'bank account';
-      lines.push('', `Account ${i + 1} (${kind}): ${a.rows} rows, ${a.unread} uncategorised (Other), ${a.unmasked} may hold an unmasked number`);
-      if (a.shapes.length) lines.push('  Uncategorised layouts:', ...a.shapes.map(s => `    ${s.count}x  ${s.shape}`));
-      if (a.unmaskedShapes.length) lines.push('  Layouts that may be unmasked:', ...a.unmaskedShapes.map(s => `    ${s.count}x  ${s.shape}`));
-    });
-    return lines.join('\n');
-  }
-
   function readingCheckDialog() {
     const rep = MD.readingReport(db.txns);
-    const text = readingReportText(rep);
+    const text = MD.readingReportText(rep, acc => (db.accounts[acc] || {}).kind);
     const unmasked = rep.reduce((n, a) => n + a.unmasked, 0);
     const unread = rep.reduce((n, a) => n + a.unread, 0);
     const body = !rep.length ? '<p class="muted">Import a statement first.</p>' : `
