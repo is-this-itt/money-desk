@@ -1,14 +1,14 @@
 // Password-protected Excel files. The fixtures are made-up statements, encrypted with the
-// password "test1234" by msoffcrypto-tool (agile) and by Office's standard AES scheme.
+// password "test1234" by msoffcrypto-tool (agile, SHA-512 and SHA-256) and by Office's standard AES scheme.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const XLSX = require('../app/vendor/xlsx.full.min.js');
 const C = require('../app/officecrypto.js');
 const MD = require('../app/parser.js');
-const crypto = require('crypto');
 
 const load = n => new Uint8Array(fs.readFileSync(path.join(__dirname, 'fixtures', n)));
 
@@ -20,7 +20,8 @@ test('sha1 and sha512 match Node for many lengths', () => {
   }
 });
 
-for (const name of ['locked-agile.xlsx', 'locked-standard.xlsx']) {
+// locked-agile-sha256.xlsx uses SHA-256 (the Web Crypto path) with AES-128.
+for (const name of ['locked-agile.xlsx', 'locked-standard.xlsx', 'locked-agile-sha256.xlsx']) {
   test(`${name}: detected, wrong password refused, right password opens the statement`, async () => {
     const bytes = load(name);
     assert.ok(C.isEncrypted(XLSX.CFB, bytes));
@@ -49,10 +50,10 @@ test('file values that could hang or exhaust the page are refused', async () => 
     e.content = Buffer.from(Buffer.from(e.content).toString('latin1').replace(from, to), 'latin1');
     return new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' }));
   };
-  await assert.rejects(C.decrypt(XLSX.CFB, tamper(/spinCount="\d+"/, 'spinCount="4000000000"'), 'test1234'), /Unsupported/);
-  await assert.rejects(C.decrypt(XLSX.CFB, tamper(/(keyData[^>]*?)blockSize="16"/, '$1blockSize="32"'), 'test1234'), /Unsupported/);
+  await assert.rejects(C.decrypt(XLSX.CFB, tamper(/spinCount="\d+"/, 'spinCount="4000000000"'), 'test1234'), /can.t open yet/);
+  await assert.rejects(C.decrypt(XLSX.CFB, tamper(/(keyData[^>]*?)blockSize="16"/, '$1blockSize="32"'), 'test1234'), /can.t open yet/);
   const cfb = XLSX.CFB.read(load('locked-standard.xlsx'), { type: 'array' });
   const pkg = XLSX.CFB.find(cfb, 'EncryptedPackage');
   const c = Buffer.from(pkg.content); c.writeUInt32LE(0xffffff00, 0); pkg.content = c;
-  await assert.rejects(C.decrypt(XLSX.CFB, new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' })), 'test1234'), /Damaged/);
+  await assert.rejects(C.decrypt(XLSX.CFB, new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' })), 'test1234'), /damaged/);
 });

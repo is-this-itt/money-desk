@@ -562,7 +562,13 @@
         if (!plain) return 'password';
         bytes = plain;
       }
-      const wb = XLSX.read(bytes, { type: 'array', cellDates: true });
+      let wb;
+      try { wb = XLSX.read(bytes, { type: 'array', cellDates: true }); }
+      catch (e) {
+        // Older .xls files use a different lock that Money Desk can't open.
+        if (/password/i.test(e.message)) throw new Error("this older .xls file is password-protected, which Money Desk can't open. In Excel, save it as .xlsx and import that");
+        throw e;
+      }
       // Use the sheet with the most rows.
       let best = null;
       for (const sn of wb.SheetNames) {
@@ -576,7 +582,7 @@
     return { kind: 'table', opts, rows, det, ...MD.rowsToTxns(rows, det, opts) };
   }
 
-  // Asks for a locked PDF's password in a dialog. Resolves with the parsed file once a
+  // Asks for a locked PDF or Excel file's password in a dialog. Resolves with the parsed file once a
   // password works, or null if the file is skipped. The password is never saved.
   function askPassword(f) {
     return new Promise((resolve, reject) => {
@@ -584,18 +590,20 @@
       const d = openDialog({
         title: 'Password needed', size: 'sm',
         body: `<p><b>${esc(f.name)}</b> is password-protected. Enter its password to open it. It's used only for this file and is never saved.</p>
-          <label class="fld">Statement password<input type="password" id="pdf-pass" autocomplete="off"></label>
-          <div id="pdf-err" class="mt" hidden><div class="note err">That password didn't open the file. Try again.</div></div>`,
-        foot: `<button class="btn" data-close>Skip this file</button><span class="spacer"></span><button class="btn primary" id="pdf-go">Open</button>`,
+          <label class="fld">Statement password<input type="password" id="file-pass" autocomplete="off"></label>
+          <div id="file-pass-err" class="mt" hidden><div class="note err">That password didn't open the file. Try again.</div></div>`,
+        foot: `<button class="btn" data-close>Skip this file</button><span class="spacer"></span><button class="btn primary" id="file-pass-go">Open</button>`,
         onClose: () => (failed ? reject(failed) : resolve(result)),
       });
-      const input = d.querySelector('#pdf-pass'), go = d.querySelector('#pdf-go');
+      const input = d.querySelector('#file-pass'), go = d.querySelector('#file-pass-go');
       const tryOpen = async () => {
         if (!input.value) return;
         go.disabled = true; go.textContent = 'Opening…';
+        // Unlocking takes about a second of hashing; let the label paint first.
+        await new Promise(r => setTimeout(r, 30));
         try {
           const res = await parseFile(f, input.value);
-          if (res === 'password') { d.querySelector('#pdf-err').hidden = false; input.select(); return; }
+          if (res === 'password') { d.querySelector('#file-pass-err').hidden = false; input.select(); return; }
           result = res; d.close();
         } catch (e) { failed = e; d.close(); }
         finally { go.disabled = false; go.textContent = 'Open'; }

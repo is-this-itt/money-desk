@@ -96,10 +96,16 @@
     return out;
   }
 
-  const HASHES = { 'SHA1': [sha1, 'SHA-1'], 'SHA-1': [sha1, 'SHA-1'], 'SHA512': [sha512, 'SHA-512'], 'SHA-512': [sha512, 'SHA-512'], 'SHA256': [null, 'SHA-256'], 'SHA-256': [null, 'SHA-256'], 'SHA384': [null, 'SHA-384'], 'SHA-384': [null, 'SHA-384'] };
+  // Hash names as Office writes them. SHA-256 and SHA-384 use Web Crypto (slower, but rare).
+  const HASHES = {
+    'SHA1': [sha1, 'SHA-1'], 'SHA-1': [sha1, 'SHA-1'],
+    'SHA512': [sha512, 'SHA-512'], 'SHA-512': [sha512, 'SHA-512'],
+    'SHA256': [null, 'SHA-256'], 'SHA-256': [null, 'SHA-256'],
+    'SHA384': [null, 'SHA-384'], 'SHA-384': [null, 'SHA-384'],
+  };
   async function hasher(name) {
     const h = HASHES[String(name).toUpperCase()];
-    if (!h) throw new Error('Unsupported hash ' + name);
+    if (!h) throw new Error(UNSUPPORTED);
     if (h[0]) return h[0];
     const s = subtle();
     return async m => new Uint8Array(await s.digest(h[1], m));
@@ -130,11 +136,12 @@
 
   // ---------- File structure ----------
   const AES_KEY_BYTES = [16, 24, 32], MAX_SPIN = 1000000;
+  const UNSUPPORTED = "this file uses a kind of password lock Money Desk can't open yet";
   // The decrypted size is stored as 8 bytes before the data; it can't be larger than the data.
   function packageSize(pkg) {
     const dv = new DataView(pkg.buffer, pkg.byteOffset, pkg.byteLength);
     const size = dv.getUint32(0, true);
-    if (dv.getUint32(4, true) !== 0 || size > pkg.length - 8) throw new Error('Damaged encrypted file');
+    if (dv.getUint32(4, true) !== 0 || size > pkg.length - 8) throw new Error('this locked file looks damaged. Download it again');
     return size;
   }
   function streams(CFB, bytes) {
@@ -153,13 +160,13 @@
     const kd = n => attr(xml, 'keyData', n), ek = n => attr(xml, 'encryptedKey', n);
     const blockSize = +kd('blockSize'), keyBytes = +ek('keyBits') / 8, dataKeyBytes = +kd('keyBits') / 8;
     // Values from the file are checked so a damaged or hostile file can't hang or exhaust the page.
-    if (blockSize !== 16 || !AES_KEY_BYTES.includes(keyBytes) || !AES_KEY_BYTES.includes(dataKeyBytes)) throw new Error('Unsupported encryption');
-    if (!/AES/i.test(ek('cipherAlgorithm') || 'AES') || !/ChainingModeCBC/i.test(ek('cipherChaining') || 'ChainingModeCBC')) throw new Error('Unsupported encryption');
+    if (blockSize !== 16 || !AES_KEY_BYTES.includes(keyBytes) || !AES_KEY_BYTES.includes(dataKeyBytes)) throw new Error(UNSUPPORTED);
+    if (!/AES/i.test(ek('cipherAlgorithm') || 'AES') || !/ChainingModeCBC/i.test(ek('cipherChaining') || 'ChainingModeCBC')) throw new Error(UNSUPPORTED);
     const hash = await hasher(ek('hashAlgorithm')), dataHash = await hasher(kd('hashAlgorithm'));
     const salt = b64(ek('saltValue'));
     let h = await hash(concat(salt, utf16(password)));
     const spin = +ek('spinCount');
-    if (!Number.isInteger(spin) || spin < 0 || spin > MAX_SPIN) throw new Error('Unsupported encryption');
+    if (!Number.isInteger(spin) || spin < 0 || spin > MAX_SPIN) throw new Error(UNSUPPORTED);
     const buf = new Uint8Array(4 + h.length);
     for (let i = 0; i < spin; i++) { buf.set(u32(i)); buf.set(h, 4); h = await hash(buf); }
     const derive = async block => fit(await hash(concat(h, Uint8Array.from(block))), keyBytes, 0x36);
@@ -185,7 +192,7 @@
     const dv = new DataView(info.buffer, info.byteOffset, info.byteLength);
     const headerSize = dv.getUint32(8, true), h0 = 12;
     const algId = dv.getUint32(h0 + 8, true), keyBits = dv.getUint32(h0 + 16, true);
-    if (![0x660e, 0x660f, 0x6610].includes(algId) || !AES_KEY_BYTES.includes(keyBits / 8)) throw new Error('Unsupported encryption');
+    if (![0x660e, 0x660f, 0x6610].includes(algId) || !AES_KEY_BYTES.includes(keyBits / 8)) throw new Error(UNSUPPORTED);
     const v = h0 + headerSize, saltSize = dv.getUint32(v, true);
     const salt = info.subarray(v + 4, v + 4 + saltSize);
     const encVerifier = info.subarray(v + 4 + saltSize, v + 20 + saltSize);
@@ -211,7 +218,7 @@
     const major = s.info[0] | (s.info[1] << 8), minor = s.info[2] | (s.info[3] << 8);
     if (major === 4 && minor === 4) return decryptAgile(s.info, s.pkg, password);
     if ((major === 3 || major === 4) && minor === 2) return decryptStandard(s.info, s.pkg, password);
-    throw new Error('Unsupported encryption version');
+    throw new Error(UNSUPPORTED);
   }
 
   const api = { isEncrypted, decrypt, sha1, sha512 };
