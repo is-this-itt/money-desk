@@ -96,3 +96,30 @@ test('Dates: Indian day-first formats and Excel serials', () => {
   assert.strictEqual(MD.parseDate(46300), '2026-10-05');
   assert.strictEqual(MD.parseDate('31/02/2026'), null);
 });
+
+test('services template rows: aliases, padding, masking hints and problems', () => {
+  const rows = [
+    ['My list'], [],
+    ['Type', 'Name', 'Bank or provider', 'Last 4 digits', 'Amount', 'How often', 'Day', 'Paid from', 'Notes', 'Status'],
+    ['subscription', 'Netflix', '', '', '649', 'monthly', '5th', 'HDFC card', '', ''],
+    ['card', 'ICICI Amazon Pay', 'ICICI', 123, '', '', 18, '', '', 'Active'],
+    ['SIP', 'Groww SIP', 'Groww', '', '₹5,000', 'Monthly', '7', 'SBI Savings', '', 'stopped'],
+    ['Bank account', 'Kotak Savings', 'Kotak', '1234567890123456', '', 'None', '', '', '', ''],
+    ['', '', '', '', '', '', '', '', '', ''],
+    ['Insurance', '', 'LIC', '', 'abc', 'fortnightly', '40', '', '', ''],
+    ['Gadget', 'Something', '', '12a4', '', '', '', '', '', ''],
+  ];
+  const { rows: out } = MD.readServiceRows(rows);
+  assert.strictEqual(out.length, 6);
+  assert.deepStrictEqual(out[0].value, { name: 'Netflix', provider: '', from: 'HDFC card', notes: '', active: true, type: 'Subscription', freq: 'Monthly', last4: '', amount: 649, day: 5 });
+  assert.deepStrictEqual([out[1].value.type, out[1].value.last4, out[1].value.day], ['Credit card', '0123', 18]);
+  assert.deepStrictEqual([out[2].value.type, out[2].value.amount, out[2].value.active], ['SIP / investment', 5000, false]);
+  assert.deepStrictEqual([out[3].value.last4, out[3].notes], ['3456', ['Kept only the last 4 digits']]);
+  assert.strictEqual(out[4].row, 9);
+  assert.deepStrictEqual(out[4].problems, ['Name is empty', '"How often" must be Monthly, Quarterly, Yearly, One-time, None', 'Amount must be a number, like 649', 'Day must be between 1 and 31']);
+  assert.deepStrictEqual([out[5].value.type, out[5].notes, out[5].problems], ['Other', ['Type "Gadget" saved as Other'], ['Last 4 digits must be 4 numbers']]);
+});
+
+test('services sheet without a Name column is rejected', () => {
+  assert.ok(MD.readServiceRows([['Date', 'Amount'], ['1 Oct', '5']]).error);
+});

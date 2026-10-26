@@ -391,8 +391,86 @@
     return res.sort((a, b) => b.monthly - a.monthly);
   }
 
+  // ---------- My services list from a spreadsheet ----------
+  const SVC_TYPES = ['Bank account', 'Credit card', 'Subscription', 'Mandate / autopay', 'SIP / investment', 'Insurance', 'Loan / EMI', 'Other'];
+  const SVC_FREQ = ['Monthly', 'Quarterly', 'Yearly', 'One-time', 'None'];
+  const SVC_COLUMNS = ['Type', 'Name', 'Bank or provider', 'Last 4 digits', 'Amount', 'How often', 'Day', 'Paid from', 'Notes', 'Status'];
+  const SVC_HEADERS = {
+    type: ['type', 'kind', 'category'], name: ['name', 'service', 'service name'],
+    provider: ['bank or provider', 'provider', 'bank', 'company'], last4: ['last 4 digits', 'last 4', 'last4', 'last four'],
+    amount: ['amount', 'amount (₹)', 'amount rs', 'price', 'emi', 'premium'], freq: ['how often', 'frequency', 'billing', 'cycle'],
+    day: ['day', 'bill or debit day', 'debit day', 'bill day', 'due day', 'date'], from: ['paid from', 'from', 'debited from', 'account'],
+    notes: ['notes', 'note', 'remarks', 'comments'], status: ['status', 'active'],
+  };
+  const TYPE_WORDS = [
+    ['Credit card', /credit|card/], ['Bank account', /bank|savings|current|account/], ['Mandate / autopay', /mandate|autopay|auto pay|nach|standing/],
+    ['SIP / investment', /sip|invest|mutual|fund|stock|ppf|nps|fd|deposit/], ['Insurance', /insur|policy|lic/], ['Loan / EMI', /loan|emi/],
+    ['Subscription', /subscri|ott|membership/], ['Other', /other/],
+  ];
+  const FREQ_WORDS = [['Monthly', /month/], ['Quarterly', /quarter/], ['Yearly', /year|annual/], ['One-time', /one|once/], ['None', /^(none|-|na|n\/a)$/]];
+  const normHead = h => String(h == null ? '' : h).toLowerCase().replace(/\s+/g, ' ').trim();
+
+  // Reads rows (arrays of cells) from a filled-in template. Returns one entry per non-empty row:
+  // { row, value, problems, notes }, where value has the fields of a service and problems lists
+  // why it can't be imported. The caller still cleans and masks each value before saving it.
+  function readServiceRows(rows) {
+    const at = rows.findIndex(r => (r || []).some(c => SVC_HEADERS.name.includes(normHead(c))));
+    if (at < 0) return { error: 'No "Name" column found. Use the template, or put the column names in the first row.' };
+    const col = {};
+    rows[at].forEach((c, i) => {
+      const h = normHead(c);
+      for (const [k, names] of Object.entries(SVC_HEADERS)) if (!(k in col) && names.includes(h)) col[k] = i;
+    });
+    const out = [];
+    for (let i = at + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const cell = k => (k in col ? r[col[k]] : '');
+      const text = k => String(cell(k) == null ? '' : cell(k)).trim();
+      if (!r.some(c => String(c == null ? '' : c).trim())) continue;
+      const problems = [], notes = [];
+      const v = { name: text('name'), provider: text('provider'), from: text('from'), notes: text('notes'), active: true };
+      if (!v.name) problems.push('Name is empty');
+
+      const t = text('type').toLowerCase();
+      v.type = SVC_TYPES.find(x => x.toLowerCase() === t) || (t && (TYPE_WORDS.find(([, re]) => re.test(t)) || [])[0]) || '';
+      if (!v.type) { v.type = 'Other'; if (t) notes.push(`Type "${text('type').slice(0, 30)}" saved as Other`); }
+
+      const f = text('freq').toLowerCase();
+      v.freq = SVC_FREQ.find(x => x.toLowerCase() === f) || (f && (FREQ_WORDS.find(([, re]) => re.test(f)) || [])[0]) || 'None';
+      if (f && !FREQ_WORDS.some(([, re]) => re.test(f))) problems.push(`"How often" must be ${SVC_FREQ.join(', ')}`);
+
+      // Excel drops leading zeros (0123 becomes 123), so short numbers are padded back.
+      const l4raw = cell('last4'), l4 = String(l4raw == null ? '' : l4raw).replace(/[\s•*xX-]/g, '');
+      if (!l4) v.last4 = '';
+      else if (/^\d{4}$/.test(l4)) v.last4 = l4;
+      else if (typeof l4raw === 'number' && /^\d{1,3}$/.test(l4)) v.last4 = l4.padStart(4, '0');
+      else if (/^\d{5,19}$/.test(l4)) { v.last4 = l4.slice(-4); notes.push('Kept only the last 4 digits'); }
+      else problems.push('Last 4 digits must be 4 numbers');
+
+      const a = cell('amount');
+      if (a === '' || a == null) v.amount = '';
+      else {
+        const n = typeof a === 'number' ? a : Number(String(a).replace(/[₹,\s]|rs\.?|inr/gi, ''));
+        if (isFinite(n) && n > 0) v.amount = n; else problems.push('Amount must be a number, like 649');
+      }
+
+      const d = cell('day');
+      if (d === '' || d == null) v.day = null;
+      else if (d instanceof Date) v.day = d.getDate();
+      else {
+        const n = Number(String(d).replace(/(st|nd|rd|th)$/i, '').trim());
+        if (Number.isInteger(n) && n >= 1 && n <= 31) v.day = n; else problems.push('Day must be between 1 and 31');
+      }
+
+      const st = text('status').toLowerCase();
+      if (/^(stopped|stop|inactive|closed|cancell?ed|no|false|0)$/.test(st)) v.active = false;
+      out.push({ row: i + 1, value: v, problems, notes });
+    }
+    return { rows: out };
+  }
+
   const PARSER_VERSION = 4;
-  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId };
+  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);
