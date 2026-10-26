@@ -289,26 +289,32 @@
     return t;
   }
 
-  // Numbers written in groups of digits joined by spaces or dashes. A run is masked when every
-  // group has 4 or more digits and the run holds 8+ ("1234 5678", "98765 43210"), or when it holds
-  // 10+ digits with at least one group of 4 or more ("987-654-3210", "98 7654 3210"). Dates
-  // ("25-10-2026") are split out and kept, a run made only of years ("FY 2025-2026") is kept, and
-  // so are small groups such as amounts ("500 100 200 300 50"). A run that also holds other digits
-  // ("2026 1234 5678") is masked on purpose.
+  // Numbers written in groups of digits joined by spaces or dashes ("98765 43210"). Dates inside
+  // a run are split out and kept; the rest is masked only when it looks like a number, not like
+  // years or small amounts. Examples are in tests/parser.test.js.
   // GROUPED is global: use it only with replace and match, which reset lastIndex, never test().
   const GROUPED = /\b\d{1,6}(?:[ -]\d{1,6})+\b/g;
-  const isDate = (g, i) => /^\d{1,2}$/.test(g[i]) && /^\d{1,2}$/.test(g[i + 1]) && /^(?:19|20)\d\d$/.test(g[i + 2] || '');
+  const isYear = x => /^(?:19|20)\d\d$/.test(x);
+  const isDayOrMonth = x => /^\d{1,2}$/.test(x);
+  // d-m-yyyy, d-m-yy and yyyy-m-d.
+  const isDate = (a, b, c) => b !== undefined && c !== undefined && isDayOrMonth(b) &&
+    ((isDayOrMonth(a) && (isYear(c) || /^\d\d$/.test(c))) || (isYear(a) && isDayOrMonth(c)));
+  const onlyYears = g => g.every(isYear);
+  // All groups of 4+ digits and 8+ in all, or 10+ digits with at least one group of 4+.
+  const looksLikeNumber = g => {
+    const digits = g.join('').length;
+    return g.every(x => x.length >= 4) ? digits >= 8 : digits >= 10 && g.some(x => x.length >= 4);
+  };
   function maskGroup(n) {
     const parts = n.split(/([ -])/); // groups at even indexes, separators at odd ones
     const g = parts.filter((x, i) => i % 2 === 0);
     for (let i = 0; i + 2 < g.length; i++) {
-      if (!isDate(g, i)) continue;
+      if (!isDate(g[i], g[i + 1], g[i + 2])) continue;
       const before = parts.slice(0, 2 * i - 1).join(''), after = parts.slice(2 * i + 6).join('');
       return (i ? maskGroup(before) + parts[2 * i - 1] : '') + parts.slice(2 * i, 2 * i + 5).join('') + (after ? parts[2 * i + 5] + maskGroup(after) : '');
     }
+    if (onlyYears(g) || !looksLikeNumber(g)) return n;
     const d = g.join('');
-    if (g.every(x => /^(?:19|20)\d\d$/.test(x))) return n;
-    if (g.every(x => x.length >= 4) ? d.length < 8 : d.length < 10 || !g.some(x => x.length >= 4)) return n;
     // Card numbers (4-4-4-4, Amex 4-6-5, Diners 4-6-4) keep the card style, XX1234.
     if (d.length >= 13 && d.length <= 19) return 'XX' + d.slice(-4);
     // Phone and account numbers keep only their last 4 digits.
@@ -690,6 +696,8 @@
 
   // The report to copy: accounts by number only. kindOf(account) gives the account's kind
   // ('card' or 'bank'); without it every account is listed as a bank account.
+  // Besides real layouts, the lists can hold two fixed labels: (merchant name) for a line flagged
+  // only by its merchant name, and (no description) for a line with no text.
   function readingReportText(rep, kindOf = () => 'bank') {
     const lines = ['Money Desk reading check: line layouts and counts only (no names, numbers, amounts, dates or account names)'];
     rep.forEach((a, i) => {

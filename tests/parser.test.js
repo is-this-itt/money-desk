@@ -95,6 +95,10 @@ test('Card numbers written in groups are masked', () => {
   assert.strictEqual(MD.redactDesc('PAID 500 100 200 300 50'), 'PAID 500 100 200 300 50');
   assert.strictEqual(MD.redactDesc('ON 5-10-2026 98765 43210'), 'ON 5-10-2026 XXXXXX3210');
   assert.strictEqual(MD.redactDesc('REF 98765 43210 25 10 2026 14 35'), 'REF XXXXXX3210 25 10 2026 14 35');
+  assert.strictEqual(MD.redactDesc('TXN 2026-10-25 14:35:22'), 'TXN 2026-10-25 14:35:22');
+  assert.strictEqual(MD.redactDesc('REF 2026-10-25 98765 43210'), 'REF 2026-10-25 XXXXXX3210');
+  assert.strictEqual(MD.redactDesc('ON 25-10-26 98765 43210'), 'ON 25-10-26 XXXXXX3210');
+  assert.strictEqual(MD.redactDesc('98765 43210 2026-10-25'), 'XXXXXX3210 2026-10-25');
   // A merchant name never keeps a number written in groups.
   assert.strictEqual(MD.extractMerchant('POS ACME STORE 987-654-3210').name, 'Acme Store');
   assert.strictEqual(MD.redactDesc('A/C 1234 5678 9012'), 'A/C XXXXXXXX9012');
