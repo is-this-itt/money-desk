@@ -402,12 +402,14 @@
     day: ['day', 'bill or debit day', 'debit day', 'bill day', 'due day'], from: ['paid from', 'debited from'],
     notes: ['notes', 'note', 'remarks', 'comments'], status: ['status', 'active'],
   };
+  // Most specific first: "Home loan account" is a loan and "Health insurance card" is insurance.
   const TYPE_WORDS = [
-    ['Bank account', /\bdebit card\b/], ['Credit card', /\bcredit\b|\bcards?\b/], ['Bank account', /\bbank\b|\bsavings\b|\bcurrent\b|\baccount\b/],
+    ['Bank account', /\bdebit card\b/],
+    ['Loan / EMI', /\bloans?\b|\bemis?\b/], ['Insurance', /\binsur|\bpolicy\b|\blic\b/],
     ['Mandate / autopay', /\bmandate|\bauto ?pay\b|\bnach\b|\bstanding\b/],
     ['SIP / investment', /\bsips?\b|\binvest|\bmutual\b|\bfunds?\b|\bstocks?\b|\bppf\b|\bnps\b|\bfds?\b|\bdeposit/],
-    ['Insurance', /\binsur|\bpolicy\b|\blic\b/], ['Loan / EMI', /\bloans?\b|\bemis?\b/],
-    ['Subscription', /\bsubscri|\bott\b|\bmembership\b/], ['Other', /\bother\b/],
+    ['Subscription', /\bsubscri|\bott\b|\bmembership\b/],
+    ['Credit card', /\bcredit\b|\bcards?\b/], ['Bank account', /\bbank\b|\bsavings\b|\bcurrent\b|\baccount\b/], ['Other', /\bother\b/],
   ];
   const FREQ_WORDS = [
     ['Monthly', /^(monthly|every month|per month|a month|month|pm|p\.m\.)$/], ['Quarterly', /^(quarterly|every 3 months|every quarter|quarter)$/],
@@ -418,8 +420,12 @@
   // Reads rows (arrays of cells) from a filled-in template. Returns one entry per non-empty row:
   // { row, value, problems, notes }, where value has the fields of a service and problems lists
   // why it can't be imported. The caller still cleans and masks each value before saving it.
+  const MAX_SERVICE_ROWS = 1000;
   function readServiceRows(rows) {
-    const at = rows.findIndex(r => (r || []).some(c => SVC_HEADERS.name.includes(normHead(c))));
+    // The header row has a Name column and at least one other known column, so a title such as
+    // "Service" above the table isn't mistaken for it.
+    const known = new Set(Object.values(SVC_HEADERS).flat());
+    const at = rows.findIndex(r => (r || []).some(c => SVC_HEADERS.name.includes(normHead(c))) && (r || []).filter(c => known.has(normHead(c))).length >= 2);
     if (at < 0) return { error: 'No "Name" column found. Use the template, or put the column names in the first row.' };
     const col = {};
     rows[at].forEach((c, i) => {
@@ -432,13 +438,16 @@
       const cell = k => (k in col ? r[col[k]] : '');
       const text = k => String(cell(k) == null ? '' : cell(k)).trim();
       if (!r.some(c => String(c == null ? '' : c).trim())) continue;
+      if (out.length >= MAX_SERVICE_ROWS) return { error: `This file has more than ${MAX_SERVICE_ROWS} rows. Split it into smaller files.` };
       const problems = [], notes = [];
       const v = { name: text('name'), provider: text('provider'), from: text('from'), notes: text('notes'), active: true };
       if (!v.name) problems.push('Name is empty');
 
       const t = text('type').toLowerCase();
-      v.type = SVC_TYPES.find(x => x.toLowerCase() === t) || (t && (TYPE_WORDS.find(([, re]) => re.test(t)) || [])[0]) || '';
+      const exact = SVC_TYPES.find(x => x.toLowerCase() === t);
+      v.type = exact || (t && (TYPE_WORDS.find(([, re]) => re.test(t)) || [])[0]) || '';
       if (!v.type) { v.type = 'Other'; if (t) notes.push(`Type "${redactDesc(text('type').slice(0, 30))}" saved as Other`); }
+      else if (!exact) notes.push(`Type read as ${v.type}`);
 
       const f = text('freq').toLowerCase().replace(/\s+/g, ' ');
       v.freq = SVC_FREQ.find(x => x.toLowerCase() === f) || (f && (FREQ_WORDS.find(([, re]) => re.test(f)) || [])[0]) || 'None';
@@ -456,7 +465,7 @@
       if (a === '' || a == null) v.amount = '';
       else {
         const n = typeof a === 'number' ? a : Number(String(a).replace(/[₹,\s]|rs\.?|inr/gi, ''));
-        if (isFinite(n) && n > 0) v.amount = n; else problems.push('Amount must be a number, like 649');
+        if (isFinite(n) && n > 0) v.amount = n; else problems.push(isFinite(n) ? 'Amount must be more than 0' : 'Amount must be a number, like 649');
       }
 
       const d = cell('day');
@@ -474,11 +483,38 @@
     }
     return { rows: out };
   }
+  // Reads a workbook made by SheetJS (passed in, so tests can use the vendored copy). A CSV is read
+  // as plain text so values like 0123 keep their leading zero.
+  function readServiceBook(XLSX, data, isCsv) {
+    const wb = isCsv ? XLSX.read(data, { type: 'string', raw: true }) : XLSX.read(data, { type: 'array', cellDates: true });
+    const sn = wb.SheetNames.find(n => /services/i.test(n)) || wb.SheetNames[0];
+    return readServiceRows(XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' }));
+  }
+
+  // Sorts read rows into ready to add, duplicates and rows with problems. clean turns a value
+  // into a saved service (or null), so the same masking applies as for the form.
+  function planServiceImport(rows, existing, clean) {
+    const have = new Set(existing.map(v => serviceKey(v))), seen = new Set();
+    const ready = [], lines = [];
+    let dup = 0, bad = 0;
+    for (const r of rows) {
+      const v = r.problems.length ? null : clean(r.value);
+      const key = v && serviceKey(v);
+      let status, kind;
+      if (!v) { status = r.problems.join('. ') || 'Name is empty'; kind = 'bad'; bad++; }
+      else if (have.has(key)) { status = 'Already on your list'; kind = 'dup'; dup++; }
+      else if (seen.has(key)) { status = 'Repeats an earlier row'; kind = 'dup'; dup++; }
+      else { seen.add(key); ready.push(v); status = ['Ready'].concat(r.notes).join('. '); kind = 'ok'; }
+      lines.push({ row: r.row, value: v || r.value, saved: !!v, status, kind });
+    }
+    return { ready, lines, dup, bad };
+  }
+
   // Two entries are the same service when type, name, last 4 digits, amount and day all match.
   const serviceKey = v => [v.type, merchantKey(v.name), v.last4, v.amount == null || v.amount === '' ? '' : Number(v.amount), v.day || ''].join('|');
 
   const PARSER_VERSION = 4;
-  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, serviceKey };
+  const api = { PARSER_VERSION, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);

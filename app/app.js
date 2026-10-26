@@ -819,11 +819,8 @@
   }
 
   async function readServiceFile(f) {
-    const wb = /\.csv$/i.test(f.name)
-      ? XLSX.read(await f.text(), { type: 'string', raw: true })
-      : XLSX.read(new Uint8Array(await f.arrayBuffer()), { type: 'array', cellDates: true });
-    const sn = wb.SheetNames.find(n => /services/i.test(n)) || wb.SheetNames[0];
-    return MD.readServiceRows(XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' }));
+    const csv = /\.csv$/i.test(f.name);
+    return MD.readServiceBook(XLSX, csv ? await f.text() : new Uint8Array(await f.arrayBuffer()), csv);
   }
 
   function serviceImportDialog() {
@@ -856,25 +853,16 @@
       d.querySelector('[data-imp-name]').classList.remove('muted');
       ready = []; go.disabled = true; go.textContent = 'Import';
       let res;
-      try { res = await readServiceFile(f); } catch (e) { res = { error: "Couldn't read this file. Save it as .xlsx or .csv and try again." }; }
+      try { res = await readServiceFile(f); } catch (e) { console.error(e); res = { error: "Couldn't read this file. Save it as .xlsx or .csv and try again." }; }
       if (mine !== reading) return; // a newer file was chosen while this one was being read
       if (res.error) { result.innerHTML = `<div class="note err mt">${esc(res.error)}</div>`; return; }
       if (!res.rows.length) { result.innerHTML = `<div class="note mt">The file has no rows under the column names yet.</div>`; return; }
       const str = (x, max) => String(x == null ? '' : x).slice(0, max);
-      const have = new Set(db.services.map(MD.serviceKey)), seen = new Set();
-      let dup = 0, bad = 0;
-      const lines = res.rows.map(r => {
-        let status, cls = '';
-        const v = r.problems.length ? null : cleanService(r.value, str);
-        const key = v && MD.serviceKey(v);
-        if (!v) { status = r.problems.join('. ') || 'Name is empty'; cls = 'bad'; bad++; }
-        else if (have.has(key)) { status = 'Already on your list'; dup++; }
-        else if (seen.has(key)) { status = 'Repeats an earlier row'; dup++; }
-        else { seen.add(key); ready.push(v); status = ['Ready'].concat(r.notes).join('. '); cls = 'ok'; }
-        const shown = v || r.value;
-        return `<tr><td class="small muted num">${r.row}</td><td><b>${esc(MD.redactDesc(str(shown.name, 80))) || '<span class="muted">—</span>'}</b><div class="small muted">${esc(shown.type)}</div></td>
-          <td class="small">${v ? serviceWhen(v) : ''}</td><td><span class="pill ${cls}">${esc(status)}</span></td></tr>`;
-      });
+      const plan = MD.planServiceImport(res.rows, db.services, v => cleanService(v, str));
+      ready = plan.ready;
+      const { dup, bad } = plan;
+      const lines = plan.lines.map(l => `<tr><td class="small muted num">${l.row}</td><td><b>${esc(MD.redactDesc(str(l.value.name, 80))) || '<span class="muted">—</span>'}</b><div class="small muted">${esc(l.value.type)}</div></td>
+          <td class="small">${l.saved ? serviceWhen(l.value) : ''}</td><td><span class="pill ${l.kind === 'dup' ? '' : l.kind}">${esc(l.status)}</span></td></tr>`);
       const parts = [`<b>${ready.length}</b> ready to add`, dup && `${dup} skipped as duplicates`, bad && `${bad} need fixing in the file`].filter(Boolean);
       result.innerHTML = `<p style="margin:14px 0 0">${parts.join(' · ')}</p>
         <div class="imp-table"><table class="list"><thead><tr><th>Row</th><th>Name</th><th>Amount and date</th><th>Status</th></tr></thead><tbody>${lines.join('')}</tbody></table></div>`;
