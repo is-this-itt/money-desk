@@ -288,14 +288,27 @@
     return t;
   }
 
+  // Numbers written in groups of digits joined by spaces or dashes. A run counts as a number to
+  // mask when it holds 8+ digits in groups of 4 to 6 ("1234 5678", "98765 43210"), or 10+ digits
+  // with shorter groups ("987-654-3210", "98 7654 3210"). Dates ("25-10-2026") stay readable,
+  // and so do runs of years ("FY 2025-2026").
+  const GROUPED = /\b\d{2,6}(?:[ -]\d{2,6})+\b/g;
+  function maskGroup(n) {
+    const g = n.split(/[ -]/), d = g.join('');
+    if (g.every(x => /^(?:19|20)\d\d$/.test(x))) return n;
+    if (d.length < (g.every(x => x.length >= 4) ? 8 : 10)) return n;
+    // Card numbers (4-4-4-4, Amex 4-6-5, Diners 4-6-4) keep the card style, XX1234.
+    if (d.length >= 13 && d.length <= 19) return 'XX' + d.slice(-4);
+    // Phone and account numbers keep only their last 4 digits.
+    return 'X'.repeat(d.length - 4) + d.slice(-4);
+  }
+
   // Masks UPI IDs, reference/account numbers and card numbers in a description line,
   // keeping enough to recognise them: ra***@oksbi, XXXXXXXX5678, XX1234.
   function redactDesc(d) {
     return clean(d)
       .replace(/\b\d{4,6}[xX*]{4,}(\d{4})\b/g, 'XX$1')
-      // Numbers written in groups: card numbers (4-4-4-4, Amex 4-6-5, Diners 4-6-4) become XX1234,
-      // phone and account numbers ("98765 43210") keep only their last 4 digits.
-      .replace(/\b\d{4,6}(?:[ -]\d{4,6})+\b/g, n => { const d = n.replace(/\D/g, ''); return d.length >= 13 && d.length <= 19 ? 'XX' + d.slice(-4) : 'X'.repeat(d.length - 4) + d.slice(-4); })
+      .replace(GROUPED, maskGroup)
       .replace(/([\w.+-]+)@([a-z][a-z0-9.]*)/gi, (m, user, handle) => (user.length > 2 ? user.slice(0, 2) + '***' : '***') + '@' + handle)
       .replace(/\d{6,}/g, n => 'X'.repeat(n.length - 4) + n.slice(-4))
       .replace(/\s+/g, ' ').trim();
@@ -634,7 +647,7 @@
   // Saved lines go through redactDesc, which leaves at most 4 digits of a number and 2 letters
   // of a UPI ID; anything longer, or a number still written in groups, means a number or ID got
   // through unmasked (for example a line saved by an older version).
-  const UNMASKED_DESC = /\d{6,}|\b\d{4,6}(?:[ -]\d{4,6})+\b|[\w.+-]{3,}@[a-z]/i;
+  const unmaskedDesc = d => /\d{6,}|[\w.+-]{3,}@[a-z]/i.test(d) || (d.match(GROUPED) || []).some(n => maskGroup(n) !== n);
   const UNMASKED_MERCHANT = /\d{5,}|@/;
 
   // Per account: rows, rows in Other / Other income, rows that may still hold an unmasked
@@ -648,11 +661,13 @@
       a.rows++;
       const desc = String(t.desc || '');
       const merchant = String(t.merchant || '');
-      const unmasked = UNMASKED_DESC.test(desc) || UNMASKED_MERCHANT.test(merchant);
+      const descUnmasked = unmaskedDesc(desc);
+      const unmasked = descUnmasked || UNMASKED_MERCHANT.test(merchant);
       const unread = t.category === 'Other' || t.category === 'Other income';
       const sh = !(unmasked || unread) ? '' : clean(desc) ? lineShape(desc) : '(no description)';
-      // When only the merchant name trips the check, the line's layout would point at the wrong thing.
-      const ush = UNMASKED_DESC.test(desc) ? sh : '(merchant name)';
+      // When only the merchant name trips the check, the line's layout would point at the wrong
+      // thing. Such a line can still be listed by its layout under the uncategorised ones.
+      const ush = descUnmasked ? sh : '(merchant name)';
       if (unmasked) { a.unmasked++; a.unmaskedShapes.set(ush, (a.unmaskedShapes.get(ush) || 0) + 1); }
       if (unread) { a.unread++; a.shapes.set(sh, (a.shapes.get(sh) || 0) + 1); }
     }
@@ -661,7 +676,8 @@
     }));
   }
 
-  // The report to copy: accounts by number only. kindOf(account) gives 'card' or 'bank'.
+  // The report to copy: accounts by number only. kindOf(account) gives the account's kind
+  // ('card' or 'bank'); without it every account is listed as a bank account.
   function readingReportText(rep, kindOf = () => 'bank') {
     const lines = ['Money Desk reading check: line layouts and counts only (no names, numbers, amounts, dates or account names)'];
     rep.forEach((a, i) => {

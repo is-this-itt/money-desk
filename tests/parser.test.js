@@ -84,7 +84,12 @@ test('Card numbers written in groups are masked', () => {
   // Phone and account numbers written in groups keep only their last 4 digits.
   assert.strictEqual(MD.redactDesc('REF 2026 1234 5678'), 'REF XXXXXXXX5678');
   assert.strictEqual(MD.redactDesc('UPI/CALL 98765 43210/UPI'), 'UPI/CALL XXXXXX3210/UPI');
-  assert.strictEqual(MD.redactDesc('MOB +91-98765-43210 PAID'), 'MOB +91-XXXXXX3210 PAID');
+  assert.strictEqual(MD.redactDesc('MOB +91-98765-43210 PAID'), 'MOB +XXXXXXXX3210 PAID');
+  assert.strictEqual(MD.redactDesc('CALL 987-654-3210'), 'CALL XXXXXX3210');
+  assert.strictEqual(MD.redactDesc('CALL 98 7654 3210'), 'CALL XXXXXX3210');
+  assert.strictEqual(MD.redactDesc('FY 2025-2026 TAX'), 'FY 2025-2026 TAX');
+  assert.strictEqual(MD.redactDesc('PERIOD 2025 2026'), 'PERIOD 2025 2026');
+  assert.strictEqual(MD.redactDesc('TXN 25 10 2026 ON 26-10-2026'), 'TXN 25 10 2026 ON 26-10-2026');
   assert.strictEqual(MD.redactDesc('A/C 1234 5678 9012'), 'A/C XXXXXXXX9012');
   assert.strictEqual(MD.redactDesc('UPI 1500 OCT 2026'), 'UPI 1500 OCT 2026');
   assert.strictEqual(MD.redactDesc(MD.redactDesc('UPI/CALL 98765 43210/UPI')), 'UPI/CALL XXXXXX3210/UPI');
@@ -323,6 +328,16 @@ test('reading check: layouts keep only bank words, counts flag unread and unmask
   // A number in groups is masked now, but a line saved before that is still flagged.
   assert.strictEqual(MD.readingReport([{ account: 'C', desc: MD.redactDesc('UPI/CALL 98765 43210/UPI'), merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 0);
   assert.strictEqual(MD.readingReport([{ account: 'C', desc: 'UPI/CALL 98765 43210/UPI', merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 1);
+  assert.strictEqual(MD.readingReport([{ account: 'C', desc: 'CALL 987-654-3210', merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 1);
+  assert.strictEqual(MD.readingReport([{ account: 'C', desc: 'FY 2025-2026 TAX ON 26-10-2026', merchant: 'X', category: 'Fees & interest' }])[0].unmasked, 0);
+  // A line saved by an older version: reopening re-masks it (redactDesc in refreshParsed) and the
+  // id still matches the original line, so importing the same statement again is still detected.
+  const raw = { date: '2026-10-01', desc: 'UPI/CALL 98765 43210/UPI', amount: -500, account: 'Kotak', accountKind: 'bank', rules: {} };
+  const fresh = MD.makeTxn(raw);
+  const saved = { ...fresh, desc: raw.desc };
+  assert.strictEqual(MD.redactDesc(saved.desc), fresh.desc);
+  assert.strictEqual(fresh.desc, 'UPI/CALL XXXXXX3210/UPI');
+  assert.strictEqual(MD.txnId(saved), fresh.id);
   const text = MD.readingReportText(rep, acc => acc === 'B' ? 'card' : 'bank');
   assert.ok(text.includes('Account 1 (bank account): 4 rows, 1 uncategorised (Other), 3 may hold an unmasked number'));
   assert.ok(text.includes('Account 2 (credit card): 4 rows, 3 uncategorised (Other), 0 may hold an unmasked number'));
