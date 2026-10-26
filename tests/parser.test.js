@@ -99,6 +99,13 @@ test('Card numbers written in groups are masked', () => {
   assert.strictEqual(MD.redactDesc('REF 2026-10-25 98765 43210'), 'REF 2026-10-25 XXXXXX3210');
   assert.strictEqual(MD.redactDesc('ON 25-10-26 98765 43210'), 'ON 25-10-26 XXXXXX3210');
   assert.strictEqual(MD.redactDesc('98765 43210 2026-10-25'), 'XXXXXX3210 2026-10-25');
+  // Two-digit groups are not taken for a date, and a phone number in them is masked.
+  assert.strictEqual(MD.redactDesc('CALL 12 34 56 78 90'), 'CALL XXXXXX7890');
+  assert.strictEqual(MD.redactDesc('CALL 98 76 54 3210'), 'CALL XXXXXX3210');
+  assert.strictEqual(MD.redactDesc('CALL 98 76 54 32 10'), 'CALL XXXXXX3210');
+  // d m yy with spaces is not read as a date, so it is masked with the number next to it.
+  assert.strictEqual(MD.redactDesc('ON 25 10 26 98765 43210'), 'ON XX3210');
+  assert.strictEqual(MD.redactDesc('TXN 25-10-2026 14 35 2026-10-25'), 'TXN 25-10-2026 14 35 2026-10-25');
   // A merchant name never keeps a number written in groups.
   assert.strictEqual(MD.extractMerchant('POS ACME STORE 987-654-3210').name, 'Acme Store');
   assert.strictEqual(MD.redactDesc('A/C 1234 5678 9012'), 'A/C XXXXXXXX9012');

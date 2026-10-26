@@ -295,21 +295,24 @@
   // GROUPED is global: use it only with replace and match, which reset lastIndex, never test().
   const GROUPED = /\b\d{1,6}(?:[ -]\d{1,6})+\b/g;
   const isYear = x => /^(?:19|20)\d\d$/.test(x);
-  const isDayOrMonth = x => /^\d{1,2}$/.test(x);
-  // d-m-yyyy, d-m-yy and yyyy-m-d.
-  const isDate = (a, b, c) => b !== undefined && c !== undefined && isDayOrMonth(b) &&
-    ((isDayOrMonth(a) && (isYear(c) || /^\d\d$/.test(c))) || (isYear(a) && isDayOrMonth(c)));
+  const inRange = (x, max) => /^\d{1,2}$/.test(x) && +x >= 1 && +x <= max;
+  // d-m-yyyy and yyyy-m-d with any one separator, and d-m-yy with dashes only, so that a number
+  // in two-digit groups ("98 76 54 32 10") is not taken for a date.
+  const isDate = (a, b, c, s1, s2) => s1 === s2 && c !== undefined && inRange(b, 12) &&
+    ((inRange(a, 31) && (isYear(c) || (s1 === '-' && /^\d\d$/.test(c)))) || (isYear(a) && inRange(c, 31)));
   const onlyYears = g => g.every(isYear);
-  // All groups of 4+ digits and 8+ in all, or 10+ digits with at least one group of 4+.
+  // All groups of 4+ digits and 8+ in all, or 10+ digits with a group of 4+ or only groups of 1-2
+  // (phone numbers). Runs of 3-digit groups, such as amounts, stay readable.
   const looksLikeNumber = g => {
     const digits = g.join('').length;
-    return g.every(x => x.length >= 4) ? digits >= 8 : digits >= 10 && g.some(x => x.length >= 4);
+    if (g.every(x => x.length >= 4)) return digits >= 8;
+    return digits >= 10 && (g.some(x => x.length >= 4) || g.every(x => x.length <= 2));
   };
   function maskGroup(n) {
     const parts = n.split(/([ -])/); // groups at even indexes, separators at odd ones
     const g = parts.filter((x, i) => i % 2 === 0);
     for (let i = 0; i + 2 < g.length; i++) {
-      if (!isDate(g[i], g[i + 1], g[i + 2])) continue;
+      if (!isDate(g[i], g[i + 1], g[i + 2], parts[2 * i + 1], parts[2 * i + 3])) continue;
       const before = parts.slice(0, 2 * i - 1).join(''), after = parts.slice(2 * i + 6).join('');
       return (i ? maskGroup(before) + parts[2 * i - 1] : '') + parts.slice(2 * i, 2 * i + 5).join('') + (after ? parts[2 * i + 5] + maskGroup(after) : '');
     }
