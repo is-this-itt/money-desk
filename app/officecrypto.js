@@ -1,10 +1,12 @@
 // Money Desk: opens password-protected Excel files (Office "agile" and "standard" encryption,
 // MS-OFFCRYPTO) on this laptop. No network, no dependencies beyond the browser's Web Crypto and
 // the vendored SheetJS CFB reader, which the caller passes in. The password is used only for the
-// one file and is never stored.
+// one file and is never stored. The agile format's data-integrity HMAC is not checked: the
+// password verifier already proves the key, and a tampered file just fails to parse.
 (function (root) {
   'use strict';
 
+  // The browser always has Web Crypto; the require fallback is for the Node tests.
   const subtle = () => (root.crypto && root.crypto.subtle) || require('crypto').webcrypto.subtle;
 
   // ---------- Hashes ----------
@@ -141,9 +143,10 @@
   const UNSUPPORTED = "this file uses a kind of password lock Money Desk can't open yet";
   // The decrypted size is stored as 8 bytes before the data; it can't be larger than the data.
   function packageSize(pkg) {
+    if (pkg.length < 8) throw new Error(DAMAGED);
     const dv = new DataView(pkg.buffer, pkg.byteOffset, pkg.byteLength);
     const size = dv.getUint32(0, true);
-    if (pkg.length < 8 || dv.getUint32(4, true) !== 0 || size > pkg.length - 8) throw new Error(DAMAGED);
+    if (dv.getUint32(4, true) !== 0 || size > pkg.length - 8) throw new Error(DAMAGED);
     return size;
   }
   function streams(CFB, bytes) {
@@ -154,16 +157,19 @@
     return info && pkg ? { info, pkg } : null;
   }
   const isEncrypted = (CFB, bytes) => bytes.length > 8 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0 && !!streams(CFB, bytes);
-  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const b64 = s => { try { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); } catch (e) { throw new Error(DAMAGED); } };
   const attr = (xml, tag, name) => { const m = new RegExp('<(?:\\w+:)?' + tag + '\\b[^>]*\\s' + name + '="([^"]*)"').exec(xml); return m ? m[1] : null; };
 
   async function decryptAgile(info, pkg, password) {
     const xml = new TextDecoder().decode(info.subarray(8));
-    const kd = n => attr(xml, 'keyData', n), ek = n => attr(xml, 'encryptedKey', n);
+    // A missing attribute means the file is damaged, not that the password is wrong.
+    const need = v => { if (v == null || v === '') throw new Error(DAMAGED); return v; };
+    const kd = n => need(attr(xml, 'keyData', n)), ek = n => need(attr(xml, 'encryptedKey', n));
+    const opt = (tag, n) => attr(xml, tag, n);
     const blockSize = +kd('blockSize'), keyBytes = +ek('keyBits') / 8, dataKeyBytes = +kd('keyBits') / 8;
     // Values from the file are checked so a damaged or hostile file can't hang or exhaust the page.
     if (blockSize !== 16 || !AES_KEY_BYTES.includes(keyBytes) || !AES_KEY_BYTES.includes(dataKeyBytes)) throw new Error(UNSUPPORTED);
-    if (!/AES/i.test(ek('cipherAlgorithm') || 'AES') || !/ChainingModeCBC/i.test(ek('cipherChaining') || 'ChainingModeCBC')) throw new Error(UNSUPPORTED);
+    if (!/AES/i.test(opt('encryptedKey', 'cipherAlgorithm') || 'AES') || !/ChainingModeCBC/i.test(opt('encryptedKey', 'cipherChaining') || 'ChainingModeCBC')) throw new Error(UNSUPPORTED);
     const hash = await hasher(ek('hashAlgorithm')), dataHash = await hasher(kd('hashAlgorithm'));
     const salt = b64(ek('saltValue'));
     let h = await hash(concat(salt, utf16(password)));
@@ -227,6 +233,7 @@
     throw new Error(UNSUPPORTED);
   }
 
+  // sha1 and sha512 are exported only so the tests can compare them with Node's.
   const api = { isEncrypted, decrypt, sha1, sha512 };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MDCrypto = api;

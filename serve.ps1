@@ -73,9 +73,14 @@ function Open-Link($req, $res) {
     "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
   ) | Where-Object { Test-Path $_ } | Select-Object -First 1
   # AbsoluteUri is fully escaped (no spaces or quotes), so it reaches the browser as one argument.
-  if ($chrome) { Start-Process -FilePath $chrome -ArgumentList $uri.AbsoluteUri }
-  else { Start-Process $uri.AbsoluteUri }
-  $res.StatusCode = 204
+  try {
+    if ($chrome) { Start-Process -FilePath $chrome -ArgumentList $uri.AbsoluteUri }
+    else { Start-Process $uri.AbsoluteUri }
+    $res.StatusCode = 204
+  } catch {
+    # The page then opens the link itself.
+    $res.StatusCode = 502
+  }
 }
 
 function Send-Text($res, [int]$status, [string]$text, [string]$type) {

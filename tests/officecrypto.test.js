@@ -73,3 +73,13 @@ test('every guide link host can be opened by the helper', () => {
   assert.ok(guide.size > 10);
   assert.deepStrictEqual([...guide].sort(), [...allowed].sort());
 });
+
+test('missing values or a truncated package are reported as damaged, not as a wrong password', async () => {
+  const cfb = XLSX.CFB.read(load('locked-agile.xlsx'), { type: 'array' });
+  const e = XLSX.CFB.find(cfb, 'EncryptionInfo');
+  e.content = Buffer.from(Buffer.from(e.content).toString('latin1').replace(/ spinCount="\d+"/, ''), 'latin1');
+  await assert.rejects(C.decrypt(XLSX.CFB, new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' })), 'test1234'), /damaged/);
+  const cfb2 = XLSX.CFB.read(load('locked-standard.xlsx'), { type: 'array' });
+  XLSX.CFB.find(cfb2, 'EncryptedPackage').content = Buffer.from([1, 2, 3]);
+  await assert.rejects(C.decrypt(XLSX.CFB, new Uint8Array(XLSX.CFB.write(cfb2, { type: 'array' })), 'test1234'), /damaged/);
+});
