@@ -796,6 +796,9 @@
     const wb = XLSX.utils.book_new();
     const list = XLSX.utils.aoa_to_sheet([MD.SVC_COLUMNS]);
     list['!cols'] = [18, 24, 18, 13, 11, 12, 7, 18, 34, 10].map(wch => ({ wch }));
+    // Last 4 digits is a text column, so Excel keeps a leading zero (0123).
+    for (let r = 2; r <= 300; r++) list['D' + r] = { t: 's', v: '', z: '@' };
+    list['!ref'] = 'A1:J300';
     XLSX.utils.book_append_sheet(wb, list, 'Services');
     const help = XLSX.utils.aoa_to_sheet([
       ['Column', 'Required', 'What to enter'],
@@ -852,6 +855,7 @@
       d.querySelector('[data-imp-name]').textContent = f.name;
       d.querySelector('[data-imp-name]').classList.remove('muted');
       ready = []; go.disabled = true; go.textContent = 'Import';
+      result.innerHTML = '<p class="muted" style="margin:14px 0 0">Reading the file…</p>';
       let res;
       try { res = await readServiceFile(f); } catch (e) { console.error(e); res = { error: "Couldn't read this file. Save it as .xlsx or .csv and try again." }; }
       if (mine !== reading) return; // a newer file was chosen while this one was being read

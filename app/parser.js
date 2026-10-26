@@ -421,7 +421,7 @@
   // { row, value, problems, notes }, where value has the fields of a service and problems lists
   // why it can't be imported. The caller still cleans and masks each value before saving it.
   const MAX_SERVICE_ROWS = 1000;
-  function readServiceRows(rows) {
+  function readServiceRows(rows, firstRow = 1) {
     // The header row has a Name column and at least one other known column, so a title such as
     // "Service" above the table isn't mistaken for it.
     const known = new Set(Object.values(SVC_HEADERS).flat());
@@ -458,6 +458,8 @@
       if (!l4) v.last4 = '';
       else if (/^\d{4}$/.test(l4)) v.last4 = l4;
       else if (typeof l4raw === 'number' && /^\d{1,3}$/.test(l4)) v.last4 = l4.padStart(4, '0');
+      // Excel keeps only 15 digits of a long number, so its last 4 can't be trusted.
+      else if (typeof l4raw === 'number') problems.push('Last 4 digits: type only the last 4 (Excel changes long numbers)');
       else if (/^\d{5,19}$/.test(l4)) { v.last4 = l4.slice(-4); notes.push('Kept only the last 4 digits'); }
       else problems.push('Last 4 digits must be 4 numbers');
 
@@ -479,7 +481,7 @@
       const st = text('status').toLowerCase();
       if (/^(stopped|stop|inactive|closed|cancell?ed|no|false|0)$/.test(st)) v.active = false;
       else if (st && !/^(active|yes|true|1|on)$/.test(st)) problems.push('Status must be Active or Stopped');
-      out.push({ row: i + 1, value: v, problems, notes });
+      out.push({ row: i + firstRow, value: v, problems, notes });
     }
     return { rows: out };
   }
@@ -488,7 +490,10 @@
   function readServiceBook(XLSX, data, isCsv) {
     const wb = isCsv ? XLSX.read(data, { type: 'string', raw: true }) : XLSX.read(data, { type: 'array', cellDates: true });
     const sn = wb.SheetNames.find(n => /services/i.test(n)) || wb.SheetNames[0];
-    return readServiceRows(XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' }));
+    const ws = wb.Sheets[sn];
+    // Row numbers in the preview match the spreadsheet even when the data doesn't start at row 1.
+    const firstRow = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']).s.r + 1 : 1;
+    return readServiceRows(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }), firstRow);
   }
 
   // Sorts read rows into ready to add, duplicates and rows with problems. clean turns a value

@@ -202,3 +202,15 @@ test('readServiceBook keeps CSV leading zeros and prefers the Services sheet', (
   const xlsx = MD.readServiceBook(XLSX, new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' })), false);
   assert.deepStrictEqual(xlsx.rows.map(r => [r.value.name, r.value.last4]), [['ICICI card', '0123']]);
 });
+
+test('services: a long number typed in Excel is a problem, row numbers follow the sheet', () => {
+  const r = MD.readServiceRows([['Name', 'Last 4 digits'], ['card', 4111111111111110], ['card', '4111111111111111']], 3).rows;
+  assert.deepStrictEqual(r.map(x => [x.row, x.value.last4, x.problems]), [
+    [4, undefined, ['Last 4 digits: type only the last 4 (Excel changes long numbers)']], [5, '1111', []],
+  ]);
+  const XLSX = require('../app/vendor/xlsx.full.min.js');
+  const ws = XLSX.utils.aoa_to_sheet([['Name', 'Amount'], ['Netflix', 649]], { origin: 'B3' });
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Services');
+  const res = MD.readServiceBook(XLSX, new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' })), false);
+  assert.deepStrictEqual(res.rows.map(x => [x.row, x.value.name]), [[4, 'Netflix']]);
+});
