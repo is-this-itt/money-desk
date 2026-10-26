@@ -15,15 +15,17 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
       # Instructions always come from the base branch, so a pull request can't rewrite them.
       - name: Load review instructions from base branch
-        run: git show "origin/${{ github.event.pull_request.base.ref }}:.github/security-review-instructions.md" > "$RUNNER_TEMP/review-instructions.md"
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: git show "origin/$BASE_REF:.github/security-review-instructions.md" > "$RUNNER_TEMP/review-instructions.md"
 
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@925afb53776cf1a2b738c6bdbed37b4d4000ef13 # v1.0.262
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
