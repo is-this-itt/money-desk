@@ -90,6 +90,13 @@ test('Card numbers written in groups are masked', () => {
   assert.strictEqual(MD.redactDesc('FY 2025-2026 TAX'), 'FY 2025-2026 TAX');
   assert.strictEqual(MD.redactDesc('PERIOD 2025 2026'), 'PERIOD 2025 2026');
   assert.strictEqual(MD.redactDesc('TXN 25 10 2026 ON 26-10-2026'), 'TXN 25 10 2026 ON 26-10-2026');
+  // A run is not allowed to swallow a date or small groups of amounts.
+  assert.strictEqual(MD.redactDesc('AT 25-10-2026 14 35 22'), 'AT 25-10-2026 14 35 22');
+  assert.strictEqual(MD.redactDesc('PAID 500 100 200 300 50'), 'PAID 500 100 200 300 50');
+  assert.strictEqual(MD.redactDesc('ON 5-10-2026 98765 43210'), 'ON 5-10-2026 XXXXXX3210');
+  assert.strictEqual(MD.redactDesc('REF 98765 43210 25 10 2026 14 35'), 'REF XXXXXX3210 25 10 2026 14 35');
+  // A merchant name never keeps a number written in groups.
+  assert.strictEqual(MD.extractMerchant('POS ACME STORE 987-654-3210').name, 'Acme Store');
   assert.strictEqual(MD.redactDesc('A/C 1234 5678 9012'), 'A/C XXXXXXXX9012');
   assert.strictEqual(MD.redactDesc('UPI 1500 OCT 2026'), 'UPI 1500 OCT 2026');
   assert.strictEqual(MD.redactDesc(MD.redactDesc('UPI/CALL 98765 43210/UPI')), 'UPI/CALL XXXXXX3210/UPI');
@@ -330,8 +337,9 @@ test('reading check: layouts keep only bank words, counts flag unread and unmask
   assert.strictEqual(MD.readingReport([{ account: 'C', desc: 'UPI/CALL 98765 43210/UPI', merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 1);
   assert.strictEqual(MD.readingReport([{ account: 'C', desc: 'CALL 987-654-3210', merchant: 'X', category: 'People (UPI)' }])[0].unmasked, 1);
   assert.strictEqual(MD.readingReport([{ account: 'C', desc: 'FY 2025-2026 TAX ON 26-10-2026', merchant: 'X', category: 'Fees & interest' }])[0].unmasked, 0);
-  // A line saved by an older version: reopening re-masks it (redactDesc in refreshParsed) and the
-  // id still matches the original line, so importing the same statement again is still detected.
+  // The parser steps refreshParsed (app.js) relies on for a line saved by an older version:
+  // re-masking gives the same text as a fresh import, and the id of the original line still
+  // matches, so importing the same statement again is still detected.
   const raw = { date: '2026-10-01', desc: 'UPI/CALL 98765 43210/UPI', amount: -500, account: 'Kotak', accountKind: 'bank', rules: {} };
   const fresh = MD.makeTxn(raw);
   const saved = { ...fresh, desc: raw.desc };

@@ -199,7 +199,8 @@
   // never keep account, card, phone or reference numbers; the masked line stays in desc.
   function extractMerchant(desc) {
     const m = readMerchant(desc);
-    const name = m.name.replace(/\d{5,}/g, ' ').replace(/[\[(]\s*[\])]/g, ' ').replace(/[\s/:.-]+$/, '').replace(/^[\s/:.-]+/, '').replace(/\s+/g, ' ').trim();
+    // No numbers in a name: drop long digit runs and numbers written in groups (see maskGroup).
+    const name = m.name.replace(GROUPED, n => maskGroup(n) === n ? n : ' ').replace(/\d{5,}/g, ' ').replace(/[\[(]\s*[\])]/g, ' ').replace(/[\s/:.-]+$/, '').replace(/^[\s/:.-]+/, '').replace(/\s+/g, ' ').trim();
     return { name: name || 'Unknown', person: m.person };
   }
 
@@ -288,15 +289,26 @@
     return t;
   }
 
-  // Numbers written in groups of digits joined by spaces or dashes. A run counts as a number to
-  // mask when it holds 8+ digits in groups of 4 to 6 ("1234 5678", "98765 43210"), or 10+ digits
-  // with shorter groups ("987-654-3210", "98 7654 3210"). Dates ("25-10-2026") stay readable,
-  // and so do runs of years ("FY 2025-2026").
-  const GROUPED = /\b\d{2,6}(?:[ -]\d{2,6})+\b/g;
+  // Numbers written in groups of digits joined by spaces or dashes. A run is masked when every
+  // group has 4 or more digits and the run holds 8+ ("1234 5678", "98765 43210"), or when it holds
+  // 10+ digits with at least one group of 4 or more ("987-654-3210", "98 7654 3210"). Dates
+  // ("25-10-2026") are split out and kept, a run made only of years ("FY 2025-2026") is kept, and
+  // so are small groups such as amounts ("500 100 200 300 50"). A run that also holds other digits
+  // ("2026 1234 5678") is masked on purpose.
+  // GROUPED is global: use it only with replace and match, which reset lastIndex, never test().
+  const GROUPED = /\b\d{1,6}(?:[ -]\d{1,6})+\b/g;
+  const isDate = (g, i) => /^\d{1,2}$/.test(g[i]) && /^\d{1,2}$/.test(g[i + 1]) && /^(?:19|20)\d\d$/.test(g[i + 2] || '');
   function maskGroup(n) {
-    const g = n.split(/[ -]/), d = g.join('');
+    const parts = n.split(/([ -])/); // groups at even indexes, separators at odd ones
+    const g = parts.filter((x, i) => i % 2 === 0);
+    for (let i = 0; i + 2 < g.length; i++) {
+      if (!isDate(g, i)) continue;
+      const before = parts.slice(0, 2 * i - 1).join(''), after = parts.slice(2 * i + 6).join('');
+      return (i ? maskGroup(before) + parts[2 * i - 1] : '') + parts.slice(2 * i, 2 * i + 5).join('') + (after ? parts[2 * i + 5] + maskGroup(after) : '');
+    }
+    const d = g.join('');
     if (g.every(x => /^(?:19|20)\d\d$/.test(x))) return n;
-    if (d.length < (g.every(x => x.length >= 4) ? 8 : 10)) return n;
+    if (g.every(x => x.length >= 4) ? d.length < 8 : d.length < 10 || !g.some(x => x.length >= 4)) return n;
     // Card numbers (4-4-4-4, Amex 4-6-5, Diners 4-6-4) keep the card style, XX1234.
     if (d.length >= 13 && d.length <= 19) return 'XX' + d.slice(-4);
     // Phone and account numbers keep only their last 4 digits.
@@ -666,7 +678,7 @@
       const unread = t.category === 'Other' || t.category === 'Other income';
       const sh = !(unmasked || unread) ? '' : clean(desc) ? lineShape(desc) : '(no description)';
       // When only the merchant name trips the check, the line's layout would point at the wrong
-      // thing. Such a line can still be listed by its layout under the uncategorised ones.
+      // thing. If the line is also uncategorised, it is listed there by its layout as usual.
       const ush = descUnmasked ? sh : '(merchant name)';
       if (unmasked) { a.unmasked++; a.unmaskedShapes.set(ush, (a.unmaskedShapes.get(ush) || 0) + 1); }
       if (unread) { a.unread++; a.shapes.set(sh, (a.shapes.get(sh) || 0) + 1); }
