@@ -486,3 +486,22 @@ test('Refreshing saved lines keeps repeats, merges copies from two files and fix
   MD.refreshSaved(data);
   assert.strictEqual(data.txns.map(t => t.id + t.amount).join(), ids);
 });
+
+test('A card line with no D or C on a statement that marks them is a note, not a charge', () => {
+  const opts = { account: 'Card', accountKind: 'card', rules: {}, source: 's.pdf' };
+  const lines = [
+    '01 Mar 26 GROCERY MART 410.00 D', '02 Mar 26 BOOK HOUSE 250.00 D', '03 Mar 26 PAYMENT RECEIVED 5,000.00 C',
+    '04 Mar 26 ONLINE STORE IN 12,000.00 D', '04 Mar 26 CONVERTED TO INSTALMENTS 12,000.00', '05 Mar 26 CAFE 90.00 D',
+    '06 Mar 26 TRANSFER TO MERCHANT EMI 12,000.00',
+  ];
+  assert.deepStrictEqual(MD.linesToTxns(lines, opts).txns.map(t => t.amount), [-410, -250, 5000, -12000, -90]);
+  // Statements that never mark lines (most card PDFs) keep every line.
+  assert.strictEqual(MD.linesToTxns(['01 Mar 26 GROCERY MART 410.00', '02 Mar 26 BOOK HOUSE 250.00'], opts).txns.length, 2);
+  // The EMI note saved by an older version is dropped when the app relabels.
+  const data = { accounts: { Card: { kind: 'card' } }, rules: {}, txns: [
+    MD.makeTxn({ date: '2026-03-04', desc: 'ONLINE STORE IN', amount: -12000, account: 'Card', accountKind: 'card', rules: {}, source: 's.pdf' }),
+    MD.makeTxn({ date: '2026-03-06', desc: 'TRANSFER TO MERCHANT EMI', amount: -12000, account: 'Card', accountKind: 'card', rules: {}, source: 's.pdf' }),
+  ] };
+  MD.refreshSaved(data);
+  assert.deepStrictEqual(data.txns.map(t => t.desc), ['ONLINE STORE IN']);
+});

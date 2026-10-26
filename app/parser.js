@@ -410,6 +410,7 @@
       const oldKey = merchantKey(t.merchant);
       const before = t.desc;
       t.source = maskSource(t.source);
+      if (kind === 'card' && /\.pdf$/i.test(t.source || '') && MEMO_LINE.test(clean(t.desc))) return false;
       if (/\.pdf$/i.test(t.source || '')) {
         if (kind === 'card' && t.amount < 0 && pdfCredit(t.desc)) t.amount = -t.amount;
         t.desc = cleanPdfDesc(t.desc, kind);
@@ -522,8 +523,12 @@
   const AMT_RE = /(?:₹|rs\.?|inr)?\s*-?\d{1,3}(?:,\d{2,3})*\.\d{2}(?:\s*(?:cr|dr|c|d)\b)?|(?:₹|rs\.?|inr)?\s*-?\d+\.\d{2}(?:\s*(?:cr|dr|c|d)\b)?/gi;
   const DATE_AT_START = /^(\d{1,2}[-/. ]\d{1,2}[-/. ]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}[-/ ]?[A-Za-z]{3,9}[-/ ,]*'?\d{2,4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m\b)?)?/i;
 
+  // Card statement lines that only note something (SBI Card prints the EMI conversion of a
+  // purchase without a D or C); the purchase itself is a line of its own.
+  const MEMO_LINE = /^transfer to merchant emi$/i;
+
   function linesToTxns(lines, opts) {
-    const out = [];
+    let out = [];
     let prevBal = null, skipped = 0, last = null;
     for (const raw of lines) {
       const line = clean(raw);
@@ -546,7 +551,7 @@
       const amts = [...rest.matchAll(AMT_RE)];
       if (!amts.length) { skipped++; continue; }
       const desc = cleanPdfDesc(rest.slice(0, amts[0].index).replace(/\b\d{8,}\b/g, ' '), opts.accountKind);
-      let amount;
+      let amount, marked = false;
       if (opts.accountKind === 'bank' && amts.length >= 2) {
         const balA = parseAmount(amts[amts.length - 1][0]);
         const txA = parseAmount(amts[amts.length - 2][0]);
@@ -561,13 +566,21 @@
         const a = parseAmount(amts[amts.length - 1][0]);
         if (!a || !a.value) { skipped++; continue; }
         const v = Math.abs(a.value);
+        marked = !!a.marker;
         if (a.marker) amount = a.marker === 'cr' ? v : -v;
         else if (opts.accountKind === 'card') amount = CREDIT_WORDS.test(desc) || pdfCredit(rest.slice(0, amts[amts.length - 1].index)) ? v : -v;
         else amount = a.value < 0 ? a.value : -v;
       }
       if (!desc && !amount) { skipped++; continue; }
-      last = { date, desc: desc || 'Transaction', amount };
+      if (opts.accountKind === 'card' && MEMO_LINE.test(desc)) { skipped++; continue; }
+      last = { date, desc: desc || 'Transaction', amount, marked };
       out.push(last);
+    }
+    // On a card statement that marks its lines D or C, a line without the letter is a note,
+    // not a charge.
+    if (opts.accountKind === 'card') {
+      const n = out.filter(t => t.marked).length;
+      if (n >= 5 && n >= out.length * 0.8) { skipped += out.length - n; out = out.filter(t => t.marked); }
     }
     return {
       txns: numberRepeats(out.map(t => makeTxn({ date: t.date, desc: t.desc, amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source }))),
