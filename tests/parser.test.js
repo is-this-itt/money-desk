@@ -287,3 +287,20 @@ test('Kotak lines: card, ATM, NACH and interest payees; merchant names never kee
   for (const d of ['KOTAK811/626912345678', 'UPI/9876543210@ybl/601012345678/UPI', 'NACH-10-DR-TEST AUTO CREDIT LI-B2WBAN0012345', 'Int.Pd:0123456789:01-07-2026'])
     assert.ok(!/\d{5,}/.test(MD.extractMerchant(d).name), d);
 });
+
+test('reading check: layouts keep only bank words, counts flag unread and unmasked rows', () => {
+  assert.strictEqual(MD.lineShape('WDL TFR UPI/DR/XXXXXXXX3937/Rahul Sh/KKBK/r ahul811pa/RUSH XXXXXXXXX2091 AT 00426 TESTPUR'), 'WDL TFR UPI/DR/x9/a/a/a9a/a x9 AT 9 a');
+  assert.strictEqual(MD.lineShape('UPI/ra***@oksbi/XXXXXXXX8068/UPI'), 'UPI/a*@a/x9/UPI');
+  const shape = MD.lineShape('DEP TFR NEFT*IDFB0001234*IDFBH2601234567*PRIYA SHARMA ENTERPRISES 12345674300 AT 01234 TESTPUR');
+  assert.ok(!/priya|sharma|\d{2,}/i.test(shape), shape);
+  const txns = [
+    { account: 'B', desc: 'UPI/XXXX1234/a', merchant: 'Shop', category: 'Other' },
+    { account: 'B', desc: 'UPI/XXXX5678/b', merchant: 'Shop', category: 'Other' },
+    { account: 'B', desc: 'SALARY ACME', merchant: 'Acme', category: 'Salary' },
+    { account: 'A', desc: 'TO 123456789 rahul.s@oksbi', merchant: 'Rahul 98765', category: 'People (UPI)' },
+  ];
+  const rep = MD.readingReport(txns);
+  assert.deepStrictEqual(rep.map(a => [a.account, a.rows, a.unread, a.unmasked]), [['A', 1, 0, 1], ['B', 3, 2, 0]]);
+  assert.deepStrictEqual(rep[1].shapes, [{ shape: 'UPI/x9/a', count: 2 }]);
+  assert.ok(!JSON.stringify(rep).includes('Shop') && !JSON.stringify(rep).includes('Acme'));
+});

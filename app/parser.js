@@ -612,8 +612,47 @@
   // Two entries are the same service when type, name, provider, last 4 digits, amount and day all match.
   const serviceKey = v => [v.type, merchantKey(v.name), merchantKey(v.provider || ''), v.last4, v.amount == null || v.amount === '' ? '' : Number(v.amount), v.day || ''].join('|');
 
+  // ---------- Reading check ----------
+  // How a statement line is laid out, with every name, number and amount taken out, e.g.
+  // "WDL TFR UPI/DR/x9/a/a/a/UPI x9 AT 9 a". Only the bank's own fixed words are kept,
+  // so the shape can be shared to improve the reader without sharing what the line says.
+  const SHAPE_WORDS = new Set(['WDL', 'DEP', 'TFR', 'UPI', 'DR', 'CR', 'NEFT', 'IMPS', 'RTGS', 'ACH', 'ACHDR', 'NACH', 'ECS', 'SI',
+    'DEBIT', 'CREDIT', 'ATM', 'ATL', 'PCD', 'POS', 'INB', 'CMP', 'MB', 'IB', 'BIL', 'ONL', 'ECOM', 'REV', 'INT', 'PD', 'TO', 'BY',
+    'FROM', 'OF', 'AT', 'TRANSFER', 'SWEEP', 'TRF', 'XFR', 'CHQ', 'CLG', 'EMI', 'FEE', 'CHARGES', 'GST', 'INTEREST', 'CASHBACK',
+    'REFUND', 'REVERSAL', 'SALARY', 'PAYMENT', 'BILL', 'CARD', 'AUTOPAY', 'MANDATE', 'GL', 'AC', 'P']);
+  function lineShape(desc) {
+    return clean(desc).slice(0, 200)
+      .replace(/[a-z]+|\d+/gi, w => /^\d+$/.test(w) ? '9' : /^x+$/i.test(w) ? 'x' : SHAPE_WORDS.has(w.toUpperCase()) ? w.toUpperCase() : 'a')
+      .replace(/x9/g, 'x9')
+      .replace(/a(?:[ .,&'-]+a)+/g, 'a')
+      .replace(/\*+/g, '*');
+  }
+
+  // Per account: how many rows, how many Money Desk couldn't put in a category, how many may
+  // still hold an unmasked number or UPI ID, and the shapes of the uncategorised lines.
+  // Counts and shapes only: no names, numbers, amounts or dates.
+  function readingReport(txns, topShapes = 15) {
+    const by = new Map();
+    for (const t of txns) {
+      const a = by.get(t.account) || { account: t.account, rows: 0, unread: 0, unmasked: 0, shapes: new Map() };
+      by.set(t.account, a);
+      a.rows++;
+      const desc = String(t.desc || ''), merchant = String(t.merchant || '');
+      if (/\d{6,}/.test(desc) || /\d{5,}/.test(merchant) || /[\w.+-]{3,}@[a-z]/i.test(desc) || /@/.test(merchant)) a.unmasked++;
+      if (t.category === 'Other' || t.category === 'Other income') {
+        a.unread++;
+        const sh = lineShape(desc);
+        a.shapes.set(sh, (a.shapes.get(sh) || 0) + 1);
+      }
+    }
+    return [...by.values()].sort((x, y) => String(x.account).localeCompare(String(y.account))).map(a => ({
+      account: a.account, rows: a.rows, unread: a.unread, unmasked: a.unmasked,
+      shapes: [...a.shapes].sort((x, y) => y[1] - x[1]).slice(0, topShapes).map(([shape, count]) => ({ shape, count })),
+    }));
+  }
+
   const PARSER_VERSION = 6;
-  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
+  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, lineShape, readingReport, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);
