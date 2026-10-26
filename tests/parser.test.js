@@ -106,6 +106,13 @@ test('Card numbers written in groups are masked', () => {
   // d m yy with spaces is not read as a date, so it is masked with the number next to it.
   assert.strictEqual(MD.redactDesc('ON 25 10 26 98765 43210'), 'ON XX3210');
   assert.strictEqual(MD.redactDesc('TXN 25-10-2026 14 35 2026-10-25'), 'TXN 25-10-2026 14 35 2026-10-25');
+  // A date in the middle of a run: each side is judged on its own.
+  assert.strictEqual(MD.redactDesc('REF 98765 43210 25-10-2026 1234 5678'), 'REF XXXXXX3210 25-10-2026 XXXX5678');
+  assert.strictEqual(MD.redactDesc('REF 98765 43210 25-10-2026'), 'REF XXXXXX3210 25-10-2026');
+  assert.strictEqual(MD.redactDesc('CALL 98765 43 21 10'), 'CALL XXXXXXX2110');
+  assert.strictEqual(MD.redactDesc('AT 14 35 22'), 'AT 14 35 22');
+  // Invoice numbers written in 4-digit groups are masked like other references.
+  assert.strictEqual(MD.redactDesc('INV-2026-0045'), 'INV-XXXX0045');
   // A merchant name never keeps a number written in groups.
   assert.strictEqual(MD.extractMerchant('POS ACME STORE 987-654-3210').name, 'Acme Store');
   assert.strictEqual(MD.redactDesc('A/C 1234 5678 9012'), 'A/C XXXXXXXX9012');

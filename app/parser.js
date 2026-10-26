@@ -309,16 +309,18 @@
     return digits >= 10 && (g.some(x => x.length >= 4) || g.every(x => x.length <= 2));
   };
   function maskGroup(n) {
-    const parts = n.split(/([ -])/); // groups at even indexes, separators at odd ones
-    const g = parts.filter((x, i) => i % 2 === 0);
+    const g = n.split(/[ -]/), sep = n.match(/[ -]/g) || []; // sep[i] sits between g[i] and g[i + 1]
+    const join = (from, to) => g.slice(from, to).map((x, k) => (k ? sep[from + k - 1] : '') + x).join('');
     for (let i = 0; i + 2 < g.length; i++) {
-      if (!isDate(g[i], g[i + 1], g[i + 2], parts[2 * i + 1], parts[2 * i + 3])) continue;
-      const before = parts.slice(0, 2 * i - 1).join(''), after = parts.slice(2 * i + 6).join('');
-      return (i ? maskGroup(before) + parts[2 * i - 1] : '') + parts.slice(2 * i, 2 * i + 5).join('') + (after ? parts[2 * i + 5] + maskGroup(after) : '');
+      if (!isDate(g[i], g[i + 1], g[i + 2], sep[i], sep[i + 1])) continue;
+      // Keep the date and judge what comes before and after it on its own.
+      const end = i + 3;
+      return (i ? maskGroup(join(0, i)) + sep[i - 1] : '') + join(i, end) + (end < g.length ? sep[end - 1] + maskGroup(join(end, g.length)) : '');
     }
     if (onlyYears(g) || !looksLikeNumber(g)) return n;
     const d = g.join('');
-    // Card numbers (4-4-4-4, Amex 4-6-5, Diners 4-6-4) keep the card style, XX1234.
+    // Card numbers (4-4-4-4, Amex 4-6-5, Diners 4-6-4) keep the card style, XX1234. A longer run,
+    // such as a card number with its expiry, keeps the run's last 4 digits, which is still masked.
     if (d.length >= 13 && d.length <= 19) return 'XX' + d.slice(-4);
     // Phone and account numbers keep only their last 4 digits.
     return 'X'.repeat(d.length - 4) + d.slice(-4);
@@ -685,12 +687,12 @@
       const descUnmasked = unmaskedDesc(desc);
       const unmasked = descUnmasked || UNMASKED_MERCHANT.test(merchant);
       const unread = t.category === 'Other' || t.category === 'Other income';
-      const sh = !(unmasked || unread) ? '' : clean(desc) ? lineShape(desc) : '(no description)';
+      const layout = !(unmasked || unread) ? '' : clean(desc) ? lineShape(desc) : '(no description)';
       // When only the merchant name trips the check, the line's layout would point at the wrong
       // thing. If the line is also uncategorised, it is listed there by its layout as usual.
-      const ush = descUnmasked ? sh : '(merchant name)';
-      if (unmasked) { a.unmasked++; a.unmaskedShapes.set(ush, (a.unmaskedShapes.get(ush) || 0) + 1); }
-      if (unread) { a.unread++; a.shapes.set(sh, (a.shapes.get(sh) || 0) + 1); }
+      const unmaskedLayout = descUnmasked ? layout : '(merchant name)';
+      if (unmasked) { a.unmasked++; a.unmaskedShapes.set(unmaskedLayout, (a.unmaskedShapes.get(unmaskedLayout) || 0) + 1); }
+      if (unread) { a.unread++; a.shapes.set(layout, (a.shapes.get(layout) || 0) + 1); }
     }
     return [...by.values()].sort((x, y) => String(x.account).localeCompare(String(y.account))).map(a => ({
       account: a.account, rows: a.rows, unread: a.unread, unmasked: a.unmasked, shapes: top(a.shapes), unmaskedShapes: top(a.unmaskedShapes),
