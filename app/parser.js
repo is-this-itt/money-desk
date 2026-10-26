@@ -614,31 +614,43 @@
 
   // ---------- Reading check ----------
   // How a statement line is laid out, with every name, number and amount taken out, e.g.
-  // "WDL TFR UPI/DR/x9/a/a/a/UPI x9 AT 9 a". Only the bank's own fixed words are kept,
-  // so the shape can be shared to improve the reader without sharing what the line says.
-  const SHAPE_WORDS = new Set(['WDL', 'DEP', 'TFR', 'UPI', 'DR', 'CR', 'NEFT', 'IMPS', 'RTGS', 'ACH', 'ACHDR', 'NACH', 'ECS', 'SI',
-    'DEBIT', 'CREDIT', 'ATM', 'ATL', 'PCD', 'POS', 'INB', 'CMP', 'MB', 'IB', 'BIL', 'ONL', 'ECOM', 'REV', 'INT', 'PD', 'TO', 'BY',
-    'FROM', 'OF', 'AT', 'TRANSFER', 'SWEEP', 'TRF', 'XFR', 'CHQ', 'CLG', 'EMI', 'FEE', 'CHARGES', 'GST', 'INTEREST', 'CASHBACK',
-    'REFUND', 'REVERSAL', 'SALARY', 'PAYMENT', 'BILL', 'CARD', 'AUTOPAY', 'MANDATE', 'GL', 'AC', 'P']);
+  // "WDL TFR UPI/DR/x9/a/a/a/UPI x9 AT 9 a". Only the bank's own fixed words are kept, so the
+  // shape can be shared to improve the reader without sharing what the line says.
+  // Keep this list to banking terms of 3+ letters (plus DR, CR, AT): nothing that could be a name.
+  const SHAPE_WORDS = new Set(['WDL', 'DEP', 'TFR', 'UPI', 'DR', 'CR', 'AT', 'NEFT', 'IMPS', 'RTGS', 'ACH', 'ACHDR', 'NACH', 'ECS',
+    'DEBIT', 'CREDIT', 'ATM', 'ATL', 'PCD', 'POS', 'INB', 'CMP', 'BIL', 'ONL', 'ECOM', 'REV', 'INT', 'FROM', 'TRANSFER', 'SWEEP',
+    'TRF', 'XFR', 'CHQ', 'CLG', 'EMI', 'FEE', 'CHARGES', 'GST', 'INTEREST', 'CASHBACK', 'REFUND', 'REVERSAL', 'SALARY', 'PAYMENT',
+    'BILL', 'CARD', 'AUTOPAY', 'MANDATE']);
   function lineShape(desc) {
     return clean(desc).slice(0, 200)
-      .replace(/[a-z]+|\d+/gi, w => /^\d+$/.test(w) ? '9' : /^x+$/i.test(w) ? 'x' : SHAPE_WORDS.has(w.toUpperCase()) ? w.toUpperCase() : 'a')
-      .replace(/x9/g, 'x9')
+      // Words and numbers in any script: a name written in Devanagari is still just "a".
+      .replace(/[\p{L}\p{M}]+|\p{N}+/gu, w => /^\p{N}+$/u.test(w) ? '9' : /^x+$/i.test(w) ? 'x' : SHAPE_WORDS.has(w.toUpperCase()) ? w.toUpperCase() : 'a')
+      .replace(/[^\x20-\x7e]/g, '?')
       .replace(/a(?:[ .,&'-]+a)+/g, 'a')
       .replace(/\*+/g, '*');
   }
 
-  // Per account: how many rows, how many Money Desk couldn't put in a category, how many may
-  // still hold an unmasked number or UPI ID, and the shapes of the uncategorised lines.
-  // Counts and shapes only: no names, numbers, amounts or dates.
+  // Saved lines go through redactDesc, which leaves at most 4 digits of a number and 2 letters
+  // of a UPI ID; anything longer means a number or ID got through unmasked.
+  const UNMASKED_DESC = /\d{6,}|[\w.+-]{3,}@[a-z]/i;
+  const UNMASKED_MERCHANT = /\d{5,}|@/;
+
+  // Per account: rows, rows in Other / Other income, rows that may still hold an unmasked
+  // number or UPI ID, and the shapes of both kinds of line. Counts and shapes only.
   function readingReport(txns, topShapes = 15) {
     const by = new Map();
+    const top = m => [...m].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, topShapes).map(([shape, count]) => ({ shape, count }));
     for (const t of txns) {
-      const a = by.get(t.account) || { account: t.account, rows: 0, unread: 0, unmasked: 0, shapes: new Map() };
+      const a = by.get(t.account) || { account: t.account, rows: 0, unread: 0, unmasked: 0, shapes: new Map(), unmaskedShapes: new Map() };
       by.set(t.account, a);
       a.rows++;
-      const desc = String(t.desc || ''), merchant = String(t.merchant || '');
-      if (/\d{6,}/.test(desc) || /\d{5,}/.test(merchant) || /[\w.+-]{3,}@[a-z]/i.test(desc) || /@/.test(merchant)) a.unmasked++;
+      const desc = String(t.desc || '');
+      const merchant = String(t.merchant || '');
+      if (UNMASKED_DESC.test(desc) || UNMASKED_MERCHANT.test(merchant)) {
+        a.unmasked++;
+        const sh = lineShape(desc);
+        a.unmaskedShapes.set(sh, (a.unmaskedShapes.get(sh) || 0) + 1);
+      }
       if (t.category === 'Other' || t.category === 'Other income') {
         a.unread++;
         const sh = lineShape(desc);
@@ -646,8 +658,7 @@
       }
     }
     return [...by.values()].sort((x, y) => String(x.account).localeCompare(String(y.account))).map(a => ({
-      account: a.account, rows: a.rows, unread: a.unread, unmasked: a.unmasked,
-      shapes: [...a.shapes].sort((x, y) => y[1] - x[1]).slice(0, topShapes).map(([shape, count]) => ({ shape, count })),
+      account: a.account, rows: a.rows, unread: a.unread, unmasked: a.unmasked, shapes: top(a.shapes), unmaskedShapes: top(a.unmaskedShapes),
     }));
   }
 

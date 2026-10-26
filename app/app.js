@@ -688,24 +688,29 @@
   }
 
   // ---------- Reading check ----------
+  // The copied text names accounts by number and kind only, since account names are typed by you
+  // and could hold a name or card digits.
   function readingReportText(rep) {
-    const lines = ['Money Desk reading check (layouts and counts only: no names, numbers, amounts or dates)'];
-    for (const a of rep) {
-      lines.push('', `${a.account}: ${a.rows} rows, ${a.unread} without a category, ${a.unmasked} may hold an unmasked number`);
-      for (const s of a.shapes) lines.push(`  ${s.count}x  ${s.shape}`);
-    }
+    const lines = ['Money Desk reading check: line layouts and counts only (no names, numbers, amounts, dates or account names)'];
+    rep.forEach((a, i) => {
+      const kind = (db.accounts[a.account] || {}).kind === 'card' ? 'credit card' : 'bank account';
+      lines.push('', `Account ${i + 1} (${kind}): ${a.rows} rows, ${a.unread} uncategorised (Other), ${a.unmasked} may hold an unmasked number`);
+      if (a.shapes.length) lines.push('  Uncategorised layouts:', ...a.shapes.map(s => `    ${s.count}x  ${s.shape}`));
+      if (a.unmaskedShapes.length) lines.push('  Layouts that may be unmasked:', ...a.unmaskedShapes.map(s => `    ${s.count}x  ${s.shape}`));
+    });
     return lines.join('\n');
   }
 
   function readingCheckDialog() {
     const rep = MD.readingReport(db.txns);
     const text = readingReportText(rep);
-    const unmasked = rep.reduce((n, a) => n + a.unmasked, 0), unread = rep.reduce((n, a) => n + a.unread, 0);
+    const unmasked = rep.reduce((n, a) => n + a.unmasked, 0);
+    const unread = rep.reduce((n, a) => n + a.unread, 0);
     const body = !rep.length ? '<p class="muted">Import a statement first.</p>' : `
-      <table class="list"><thead><tr><th>Account</th><th class="r">Rows</th><th class="r">Without a category</th><th class="r">May be unmasked</th></tr></thead><tbody>
-      ${rep.map(a => `<tr><td><b>${esc(a.account)}</b></td><td class="r num">${a.rows}</td><td class="r num">${a.unread}</td><td class="r num">${a.unmasked ? `<span class="pill bad">${a.unmasked}</span>` : '0'}</td></tr>`).join('')}
+      <table class="list"><thead><tr><th>Account</th><th class="r">Rows</th><th class="r">Uncategorised (Other)</th><th class="r">May be unmasked</th></tr></thead><tbody>
+      ${rep.map((a, i) => `<tr><td><b>${esc(a.account)}</b><div class="small muted">Account ${i + 1} in the report</div></td><td class="r num">${a.rows}</td><td class="r num">${a.unread}</td><td class="r num">${a.unmasked ? `<span class="pill bad">${a.unmasked}</span>` : '0'}</td></tr>`).join('')}
       </tbody></table>
-      <p class="muted">${unmasked ? 'Some lines may still show a number or UPI ID in full. Share this report so the masking can be fixed; the lines themselves stay on this laptop.' : 'Every saved line is masked.'} ${unread ? 'Layouts of the lines without a category are in the report below.' : 'Every line has a category.'}</p>
+      <p class="muted">${unmasked ? 'Some lines may still show a number or UPI ID in full; their layouts are in the report so the masking can be fixed.' : 'No unmasked numbers found.'} ${unread ? 'Layouts of the uncategorised lines are in the report too.' : 'Every line has a category.'} The report names accounts by number only.</p>
       <textarea class="report" readonly rows="12" aria-label="Reading check report">${esc(text)}</textarea>`;
     const d = openDialog({
       title: 'Reading check', body,
@@ -714,9 +719,14 @@
     const copy = d.querySelector('[data-copy]');
     if (copy) copy.onclick = () => {
       const area = d.querySelector('textarea');
-      const done = () => toast('Report copied. It has no names, numbers or amounts.');
-      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, () => { area.select(); document.execCommand('copy'); done(); });
-      else { area.select(); document.execCommand('copy'); done(); }
+      const fallback = () => {
+        area.focus(); area.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch { }
+        toast(ok ? 'Report copied.' : 'The text is selected: press Ctrl+C to copy it.');
+      };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Report copied.'), fallback);
+      else fallback();
     };
   }
 
@@ -979,7 +989,7 @@
           <div><p class="muted" style="margin-top:0">${fileMode ? 'Your data is in <b>data\\money-desk.json</b> inside your Money Desk folder, with a copy for each of the last 30 days in <b>data\\backups</b>. For extra safety, download a backup to another drive now and then.' : 'Until then, changes are kept only in this window\'s browser storage.'}</p>
             <div class="form-row"><button class="btn primary" data-act="backup">Download backup</button><button class="btn" data-act="restore">Restore from backup</button><button class="btn" data-act="load-sample">Load sample data</button></div></div></div>
         <div class="section"><div><h2>Reading check</h2><div class="desc">What Money Desk couldn't read or mask, without names, numbers, amounts or dates.</div></div>
-          <div><p class="muted" style="margin-top:0">Lines it couldn't put in a category are shown only by their layout, like <b>WDL TFR UPI/DR/x9/a/a</b>. You can copy the report and share it to get the reader improved, without sharing your statements.</p>
+          <div><p class="muted" style="margin-top:0">Lines are shown only by their layout, like <b>WDL TFR UPI/DR/x9/a/a</b>. Share the report to get the reader improved without sharing your statements.</p>
             <div class="form-row"><button class="btn" data-act="reading-check">Run the check</button></div></div></div>
         <div class="section"><div><h2>Delete everything</h2><div class="desc">Removes every transaction, account, rule and service.</div></div>
           <div><button class="btn danger" data-act="clear">Delete everything…</button></div></div>
