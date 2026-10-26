@@ -157,10 +157,19 @@
 
   // Card PDF rows carry reward points and footer text next to the description.
   function cleanPdfDesc(d, kind) {
-    let s = clean(d).replace(/\s+\S*%.*$/, '').replace(/\s+#.*$/, '');
-    if (kind === 'card') s = s.replace(/\s\d{1,5}(?=(\s[A-Za-z]{2})?$)/, '');
+    let s = clean(d);
+    // HDFC's newer card layout: "| | hh:mm <details> (Ref# ...) + C", where C is the
+    // rupee sign and "+" marks a credit (see pdfCredit).
+    if (/^\|/.test(s)) s = s.replace(/^[|\s]+/, '').replace(/^\d{1,2}:\d{2}\s+/, '').replace(/\s*\(Ref#[^)]*\)/gi, ' ').replace(/\s*\+?\s*C$/, '');
+    s = s.replace(/\s+\S*%.*$/, '').replace(/\s+#.*$/, '');
+    // Card lines end in reward points, negative when a refund takes them back ("... IN -125").
+    if (kind === 'card') s = s.replace(/\s-?\d{1,5}(?=(\s[A-Za-z]{2})?$)/, '');
     return s.trim();
   }
+
+  // True when a card line marks its amount as a credit with "+" before the rupee sign (HDFC).
+  // Only HDFC's layout starts with "|", so a merchant ending in "+ C" elsewhere stays a purchase.
+  const pdfCredit = text => /^\s*\|.*\+\s*(?:C|₹)\s*$/.test(text);
 
   function titleCase(s) {
     return s.toLowerCase().replace(/\b([a-z])/g, (m, c) => c.toUpperCase()).replace(/\b(Upi|Atm|Emi|Sip|Lic|Neft|Imps|Gst|Bse|Nse|Hdfc|Sbi|Icici|Irctc|Kfc|Pvr)\b/g, w => w.toUpperCase());
@@ -348,6 +357,124 @@
     return (h >>> 0).toString(36) + s.length.toString(36);
   }
 
+  // The same line can really happen twice (two identical small payments at one shop on one day). The second and
+  // later copies get "d2", "d3"... on their id, so they are kept and a re-import still matches.
+  // Ids already in use in txns are skipped, so numbering a list that includes saved lines never
+  // gives two lines one id.
+  function numberRepeats(txns) {
+    const taken = new Set(), last = new Map();
+    for (const t of txns) {
+      if (!taken.has(t.id)) { taken.add(t.id); continue; }
+      const base = t.id;
+      let n = last.get(base) || 1;
+      do n++; while (taken.has(base + 'd' + n));
+      last.set(base, n);
+      t.id = base + 'd' + n;
+      taken.add(t.id);
+    }
+    return txns;
+  }
+
+  // Moves the lines that inStatement picks into another account: new ids (the account is part of
+  // the id), numbered against lines already there, and categories for the new account's type.
+  // Categories you picked yourself are kept. Lines already in that account (findImported) are
+  // dropped instead of being added twice. Returns { txns, moved, dropped }.
+  // The moved line objects are changed in place, including the ones dropped afterwards.
+  function moveStatement(txns, inStatement, account, accountKind, rules) {
+    const there = txns.filter(t => t.account === account);
+    let moved = txns.filter(inStatement);
+    for (const t of moved) {
+      t.account = account;
+      t.id = txnId(t);
+      if (!t.manual) {
+        let c = categorize(t.desc, t.merchant, t.amount, rules, accountKind);
+        if (c === 'Other' && extractMerchant(t.desc).person) c = 'People (UPI)';
+        t.category = c;
+      }
+    }
+    numberRepeats(moved);
+    const known = findImported(there, moved);
+    const drop = new Set(moved.filter((t, i) => known.has(i)));
+    moved = moved.filter(t => !drop.has(t));
+    numberRepeats([...there, ...moved]);
+    return { txns: txns.filter(t => !drop.has(t)), moved, dropped: drop.size };
+  }
+
+  // After the reader improves (PARSER_VERSION), re-clean saved lines in data ({ txns, rules,
+  // accounts }): descriptions, merchant names and categories (yours are kept), file names, and
+  // HDFC credits older versions read as spending. Rules follow a merchant whose name changes.
+  function refreshSaved(data) {
+    const firstSource = new Map();
+    const own = k => Object.prototype.hasOwnProperty.call(data.rules, k);
+    data.txns = data.txns.filter(t => {
+      const kind = (data.accounts[t.account] || {}).kind || 'bank';
+      const oldKey = merchantKey(t.merchant);
+      const before = t.desc;
+      if (t.source) t.source = maskSource(t.source);
+      if (kind === 'card' && /\.pdf$/i.test(t.source || '') && MEMO_LINE.test(clean(t.desc))) return false;
+      if (/\.pdf$/i.test(t.source || '')) {
+        if (kind === 'card' && t.amount < 0 && pdfCredit(t.desc)) t.amount = -t.amount;
+        t.desc = cleanPdfDesc(t.desc, kind);
+      }
+      const m = extractMerchant(t.desc);
+      t.merchant = m.name;
+      const key = merchantKey(m.name);
+      if (own(oldKey) && !own(key) && key !== '__proto__') data.rules[key] = data.rules[oldKey];
+      if (!t.manual) {
+        let c = categorize(t.desc, m.name, t.amount, data.rules, kind);
+        if (c === 'Other' && m.person) c = 'People (UPI)';
+        t.category = c;
+      }
+      // Keep the id unless the line was cleaned (a flipped amount always comes with a cleaned
+      // line), so re-imports are still recognised.
+      if (t.desc !== before) t.id = txnId(t);
+      t.desc = redactDesc(t.desc);
+      // One id from two statements is one line imported twice. From one statement it is a real
+      // repeat: imports skip lines whose id is already saved, so one file can't come in twice.
+      // The trade-off: two different statements that overlap in dates and both list the very
+      // same line (same date, amount and wording) keep only one copy of it. Masking can also make
+      // two file names alike (long numbers that differ only before their last four digits).
+      if (!firstSource.has(t.id)) { firstSource.set(t.id, t.source); return true; }
+      return firstSource.get(t.id) === t.source;
+    });
+    numberRepeats(data.txns);
+    return data;
+  }
+
+  // Letters and digits a description needs before a prefix match counts, so short names
+  // ("UPI-RAHUL" vs "UPI-RAHUL KUMAR") stay apart.
+  const SAME_LINE_MIN = 16;
+
+  // Which newly read lines are already saved: the same id, or the same account, date and amount
+  // with one description starting the other ("... MUMBAI" vs "... MUMBAI IN"), since two
+  // downloads of one statement can be laid out differently. Each saved line matches once.
+  // Returns a Set of indexes into fresh.
+  function findImported(saved, fresh) {
+    const ids = new Set(saved.map(t => t.id));
+    const norm = d => String(d || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const pool = new Map();
+    for (const t of saved) {
+      const k = `${t.account}|${t.date}|${t.amount}`;
+      if (!pool.has(k)) pool.set(k, []);
+      pool.get(k).push({ d: norm(t.desc), id: t.id, used: false });
+    }
+    const out = new Set();
+    fresh.forEach((t, i) => {
+      const list = pool.get(`${t.account}|${t.date}|${t.amount}`) || [];
+      if (ids.has(t.id)) {
+        const hit = list.find(x => x.id === t.id && !x.used);
+        if (hit) { hit.used = true; out.add(i); return; }
+      }
+      const d = norm(t.desc);
+      const hit = d.length >= SAME_LINE_MIN && list.find(x => !x.used && x.d.length >= SAME_LINE_MIN && (x.d.startsWith(d) || d.startsWith(x.d)));
+      if (hit) { hit.used = true; out.add(i); }
+    });
+    return out;
+  }
+
+  // File names can carry a card or statement number: keep only the last 4 digits of long ones.
+  const maskSource = name => String(name || '').replace(/\d{10,}/g, n => 'X'.repeat(n.length - 4) + n.slice(-4));
+
   const CREDIT_WORDS = /(refund|reversal|cashback|cash back|payment received|thank you|credited|credit$)/i;
 
   // rows: array of arrays. map: column indexes. Returns { txns, skipped }
@@ -389,7 +516,7 @@
       out.push({ date, desc, amount });
     }
     return {
-      txns: out.map(t => makeTxn({ date: t.date, desc: t.desc + (t.__more || ''), amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source })),
+      txns: numberRepeats(out.map(t => makeTxn({ date: t.date, desc: t.desc + (t.__more || ''), amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source }))),
       skipped,
     };
   }
@@ -398,8 +525,12 @@
   const AMT_RE = /(?:₹|rs\.?|inr)?\s*-?\d{1,3}(?:,\d{2,3})*\.\d{2}(?:\s*(?:cr|dr|c|d)\b)?|(?:₹|rs\.?|inr)?\s*-?\d+\.\d{2}(?:\s*(?:cr|dr|c|d)\b)?/gi;
   const DATE_AT_START = /^(\d{1,2}[-/. ]\d{1,2}[-/. ]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}[-/ ]?[A-Za-z]{3,9}[-/ ,]*'?\d{2,4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m\b)?)?/i;
 
+  // Card statement lines that only note something (SBI Card prints the EMI conversion of a
+  // purchase without a D or C); the purchase itself is a line of its own.
+  const MEMO_LINE = /^transfer to merchant emi$/i;
+
   function linesToTxns(lines, opts) {
-    const out = [];
+    let out = [];
     let prevBal = null, skipped = 0, last = null;
     for (const raw of lines) {
       const line = clean(raw);
@@ -422,7 +553,7 @@
       const amts = [...rest.matchAll(AMT_RE)];
       if (!amts.length) { skipped++; continue; }
       const desc = cleanPdfDesc(rest.slice(0, amts[0].index).replace(/\b\d{8,}\b/g, ' '), opts.accountKind);
-      let amount;
+      let amount, marked = false;
       if (opts.accountKind === 'bank' && amts.length >= 2) {
         const balA = parseAmount(amts[amts.length - 1][0]);
         const txA = parseAmount(amts[amts.length - 2][0]);
@@ -437,16 +568,29 @@
         const a = parseAmount(amts[amts.length - 1][0]);
         if (!a || !a.value) { skipped++; continue; }
         const v = Math.abs(a.value);
+        marked = !!a.marker;
         if (a.marker) amount = a.marker === 'cr' ? v : -v;
-        else if (opts.accountKind === 'card') amount = CREDIT_WORDS.test(desc) ? v : -v;
+        else if (opts.accountKind === 'card') amount = CREDIT_WORDS.test(desc) || pdfCredit(rest.slice(0, amts[amts.length - 1].index)) ? v : -v;
         else amount = a.value < 0 ? a.value : -v;
       }
       if (!desc && !amount) { skipped++; continue; }
-      last = { date, desc: desc || 'Transaction', amount };
+      if (opts.accountKind === 'card' && MEMO_LINE.test(desc)) { skipped++; continue; }
+      last = { date, desc: desc || 'Transaction', amount, marked };
       out.push(last);
     }
+    // On a card statement that marks its lines D or C, a line without the letter that repeats
+    // the amount of a marked line is a note about that line, not a second charge. Other
+    // unmarked lines are kept.
+    if (opts.accountKind === 'card') {
+      const marked = out.filter(t => t.marked);
+      if (marked.length >= 5 && marked.length >= out.length * 0.8) {
+        const charged = new Set(marked.map(t => Math.abs(t.amount)));
+        const keep = out.filter(t => t.marked || !charged.has(Math.abs(t.amount)));
+        skipped += out.length - keep.length; out = keep;
+      }
+    }
     return {
-      txns: out.map(t => makeTxn({ date: t.date, desc: t.desc, amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source })),
+      txns: numberRepeats(out.map(t => makeTxn({ date: t.date, desc: t.desc, amount: t.amount, account: opts.account, accountKind: opts.accountKind, rules: opts.rules, source: opts.source }))),
       skipped,
     };
   }
@@ -718,8 +862,8 @@
     return lines.join('\n');
   }
 
-  const PARSER_VERSION = 8;
-  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
+  const PARSER_VERSION = 9;
+  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, numberRepeats, moveStatement, refreshSaved, findImported, maskSource, pdfCredit, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);

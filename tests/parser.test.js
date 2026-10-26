@@ -389,3 +389,122 @@ test('SBI UPI reversals are refunds', () => {
   const again = MD.makeTxn({ date: '2026-05-01', desc: t.desc, amount: 250, account: 'S', accountKind: 'bank', rules: {} });
   assert.deepStrictEqual([again.merchant, again.category], ['UPI Reversal', 'Refunds & cashback']);
 });
+
+test('Repeated lines keep their own ids; re-imports and reworded copies are found', () => {
+  const opts = { account: 'Card', accountKind: 'card', rules: {}, source: 'x.pdf' };
+  const lines = ['05/01/2026 UPI- -TEA STALL IN 30.00', '05/01/2026 UPI- -TEA STALL IN 30.00', '06/01/2026 UPI- -TEA STALL IN 30.00'];
+  const a = MD.linesToTxns(lines, opts).txns;
+  assert.strictEqual(new Set(a.map(t => t.id)).size, 3);
+  assert.strictEqual(a[1].id, a[0].id + 'd2');
+  // The same file again: every line is already saved.
+  assert.strictEqual(MD.findImported(a, MD.linesToTxns(lines, opts).txns).size, 3);
+  // A second download of a statement can word a line a little differently.
+  const mk = (desc, account, source) => MD.makeTxn({ date: '2026-02-10', desc, amount: -499, account, accountKind: 'card', rules: {}, source });
+  const saved = [mk('ACME STREAMING MUMBAI IN', 'Card', 'a.pdf')];
+  const again = [mk('ACME STREAMING MUMBAI', 'Card', 'b.pdf'), mk('ACME STREAMING MUMBAI', 'Card', 'b.pdf'), mk('ACME STREAMING MUMBAI', 'Other card', 'b.pdf')];
+  // Each saved line matches once, and only in its own account.
+  assert.deepStrictEqual([...MD.findImported(saved, again)], [0]);
+});
+
+test('HDFC newer card layout: "+ C" is a credit, time and Ref# are dropped', () => {
+  const opts = { account: 'HDFC', accountKind: 'card', rules: {}, source: 'h.pdf' };
+  const [pay, emi] = MD.linesToTxns([
+    '02/02/2026 | | 10:15 BPPY CC PAYMENT AB11112222333344 (Ref# ST000011112222333344) + C 1,500.00',
+    '14/02/2026 | | 00:00 OFFUS EMI,PRIN NB:03, (Ref# ) C 640.00',
+  ], opts).txns;
+  assert.strictEqual(pay.amount, 1500);
+  assert.strictEqual(pay.category, 'Card payments & transfers');
+  assert.ok(/^BPPY CC PAYMENT/.test(pay.desc) && !/Ref#|10:15|\+ C/.test(pay.desc));
+  assert.strictEqual(emi.amount, -640);
+  assert.strictEqual(emi.desc, 'OFFUS EMI,PRIN NB:03,');
+  assert.strictEqual(emi.category, 'EMI & loans');
+  // A line saved by an older version is cleaned the same way when the app relabels it.
+  assert.strictEqual(MD.cleanPdfDesc('| | 00:00 OFFUS EMI,PRIN NB:03, (Ref# ) C', 'card'), 'OFFUS EMI,PRIN NB:03,');
+  assert.ok(MD.pdfCredit('| | 10:15 BPPY CC PAYMENT ABXX3344 (Ref# STXXXX3344) + C'));
+  assert.ok(!MD.pdfCredit('| | 00:00 OFFUS EMI,PRIN NB:03, (Ref# ) C'));
+  // A merchant name ending in "+" is still a purchase.
+  assert.ok(!MD.pdfCredit('STREAMPLUS+'));
+  assert.ok(!MD.pdfCredit('GADGETS PLUS+ C'));
+  assert.strictEqual(MD.linesToTxns(['03/02/2026 STREAMPLUS+ MUMBAI IN 299.00', '04/02/2026 ACME PLUS+ 150.00'], opts).txns.map(t => t.amount).join(), '-299,-150');
+  // Reward points that a refund takes back are not part of the merchant name.
+  assert.strictEqual(MD.cleanPdfDesc('ACME TRAVELS PVT NEW DELHI IN -40', 'card'), 'ACME TRAVELS PVT NEW DELHI IN');
+});
+
+test('Long numbers in statement file names are masked', () => {
+  assert.strictEqual(MD.maskSource('1234567890123456_01022026.pdf'), 'XXXXXXXXXXXX3456_01022026.pdf');
+  assert.strictEqual(MD.maskSource('4111XXXXXXXX1111_12345_Statement.pdf'), '4111XXXXXXXX1111_12345_Statement.pdf');
+});
+
+test('Moving a statement gives new ids that never clash with lines already there', () => {
+  const mk = (account, source) => MD.makeTxn({ date: '2026-03-01', desc: 'TEA STALL', amount: -30, account, accountKind: 'card', rules: {}, source });
+  const txns = MD.numberRepeats([mk('Target', 'a.pdf'), mk('Target', 'a.pdf'), mk('Wrong', 'b.pdf'), mk('Wrong', 'b.pdf'), mk('Wrong', 'c.pdf')]);
+  // b.pdf holds the same two lines that a.pdf already put in Target: they are dropped, not doubled.
+  const r = MD.moveStatement(txns, t => t.account === 'Wrong' && t.source === 'b.pdf', 'Target', 'card', {});
+  assert.deepStrictEqual([r.moved.length, r.dropped, r.txns.length], [0, 2, 3]);
+  // One of the line already there and two in the moved statement: only one is dropped.
+  const one = MD.numberRepeats([mk('Target', 'a.pdf'), mk('Wrong', 'b.pdf'), mk('Wrong', 'b.pdf')]);
+  const r1 = MD.moveStatement(one, t => t.source === 'b.pdf', 'Target', 'card', {});
+  assert.deepStrictEqual([r1.moved.length, r1.dropped, r1.txns.length, new Set(r1.txns.map(t => t.id)).size], [1, 1, 2, 2]);
+  // A statement with lines Target doesn't have yet moves, with ids that don't clash.
+  const more = MD.numberRepeats([mk('Target', 'a.pdf'), mk('Wrong', 'e.pdf'), mk('Wrong', 'e.pdf')]);
+  more[1].desc = more[2].desc = 'BAKERY';
+  more[1].id = more[2].id = MD.txnId(more[1]);
+  const r2 = MD.moveStatement(more, t => t.source === 'e.pdf', 'Target', 'card', {});
+  assert.deepStrictEqual([r2.moved.length, r2.dropped], [2, 0]);
+  assert.strictEqual(new Set(r2.txns.map(t => t.id)).size, 3);
+  assert.ok(r2.txns.every(t => t.account === 'Target'));
+  // A category picked by hand stays.
+  const manual = [Object.assign(mk('Wrong', 'd.pdf'), { category: 'Health & fitness', manual: true })];
+  assert.strictEqual(MD.moveStatement(manual, () => true, 'Target', 'card', {}).moved[0].category, 'Health & fitness');
+});
+
+test('Short look-alike descriptions are not taken for the same line', () => {
+  const mk = (desc, source) => MD.makeTxn({ date: '2026-03-02', desc, amount: -200, account: 'Bank', accountKind: 'bank', rules: {}, source });
+  assert.strictEqual(MD.findImported([mk('UPI-RAHUL', 'a.csv')], [mk('UPI-RAHUL KUMAR', 'b.csv')]).size, 0);
+});
+
+test('Refreshing saved lines keeps repeats, merges copies from two files and fixes HDFC credits', () => {
+  const card = { kind: 'card' };
+  const line = (desc, amount, source) => ({ id: MD.txnId({ account: 'Card', date: '2026-02-02', amount, desc }), date: '2026-02-02', desc, merchant: 'Old', amount, account: 'Card', category: 'Other', source });
+  const data = {
+    accounts: { Card: card }, rules: {},
+    txns: [
+      line('TEA STALL', -30, 'a.pdf'), line('TEA STALL', -30, 'a.pdf'),       // a real repeat
+      line('TEA STALL', -30, 'b.pdf'),                                        // the same line from another file
+      line('| | 10:15 BPPY CC PAYMENT AB12 (Ref# ST12) + C', -1500, 'h.pdf'),   // saved by an older version
+      line('BAKERY', -80, '1234567890123456_01022026.pdf'),
+    ],
+  };
+  MD.refreshSaved(data);
+  assert.strictEqual(data.txns.length, 4);
+  assert.strictEqual(new Set(data.txns.map(t => t.id)).size, 4);
+  const pay = data.txns.find(t => /BPPY/.test(t.desc));
+  assert.deepStrictEqual([pay.amount, pay.category, pay.desc], [1500, 'Card payments & transfers', 'BPPY CC PAYMENT AB12']);
+  assert.ok(data.txns.some(t => t.source === 'XXXXXXXXXXXX3456_01022026.pdf'));
+  // Running it again changes nothing.
+  const ids = data.txns.map(t => t.id + t.amount).join();
+  MD.refreshSaved(data);
+  assert.strictEqual(data.txns.map(t => t.id + t.amount).join(), ids);
+});
+
+test('A card line with no D or C on a statement that marks them is a note, not a charge', () => {
+  const opts = { account: 'Card', accountKind: 'card', rules: {}, source: 's.pdf' };
+  const lines = [
+    '01 Mar 26 GROCERY MART 410.00 D', '02 Mar 26 BOOK HOUSE 250.00 D', '03 Mar 26 PAYMENT RECEIVED 5,000.00 C',
+    '04 Mar 26 ONLINE STORE IN 12,000.00 D', '04 Mar 26 CONVERTED TO INSTALMENTS 12,000.00', '05 Mar 26 CAFE 90.00 D',
+    '06 Mar 26 TRANSFER TO MERCHANT EMI 12,000.00',
+  ];
+  assert.deepStrictEqual(MD.linesToTxns(lines, opts).txns.map(t => t.amount), [-410, -250, 5000, -12000, -90]);
+  // An unmarked line with an amount of its own is kept, in case its letter was lost.
+  assert.deepStrictEqual(MD.linesToTxns([...lines, '07 Mar 26 PETROL PUMP 1,800.00', '08 Mar 26 PHARMACY 120.00 D', '09 Mar 26 BAKERY 60.00 D', '10 Mar 26 TAXI 300.00 D'], opts).txns.map(t => t.amount),
+    [-410, -250, 5000, -12000, -90, -1800, -120, -60, -300]);
+  // Statements that never mark lines (most card PDFs) keep every line.
+  assert.strictEqual(MD.linesToTxns(['01 Mar 26 GROCERY MART 410.00', '02 Mar 26 BOOK HOUSE 250.00'], opts).txns.length, 2);
+  // The EMI note saved by an older version is dropped when the app relabels.
+  const data = { accounts: { Card: { kind: 'card' } }, rules: {}, txns: [
+    MD.makeTxn({ date: '2026-03-04', desc: 'ONLINE STORE IN', amount: -12000, account: 'Card', accountKind: 'card', rules: {}, source: 's.pdf' }),
+    MD.makeTxn({ date: '2026-03-06', desc: 'TRANSFER TO MERCHANT EMI', amount: -12000, account: 'Card', accountKind: 'card', rules: {}, source: 's.pdf' }),
+  ] };
+  MD.refreshSaved(data);
+  assert.deepStrictEqual(data.txns.map(t => t.desc), ['ONLINE STORE IN']);
+});
