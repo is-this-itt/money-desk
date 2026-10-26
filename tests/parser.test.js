@@ -424,6 +424,7 @@ test('HDFC newer card layout: "+ C" is a credit, time and Ref# are dropped', () 
   assert.ok(!MD.pdfCredit('| | 00:00 OFFUS EMI,PRIN NB:03, (Ref# ) C'));
   // A merchant name ending in "+" is still a purchase.
   assert.ok(!MD.pdfCredit('STREAMPLUS+'));
+  assert.ok(!MD.pdfCredit('GADGETS PLUS+ C'));
   assert.strictEqual(MD.linesToTxns(['03/02/2026 STREAMPLUS+ MUMBAI IN 299.00', '04/02/2026 ACME PLUS+ 150.00'], opts).txns.map(t => t.amount).join(), '-299,-150');
   // Reward points that a refund takes back are not part of the merchant name.
   assert.strictEqual(MD.cleanPdfDesc('ACME TRAVELS PVT NEW DELHI IN -40', 'card'), 'ACME TRAVELS PVT NEW DELHI IN');
@@ -437,17 +438,47 @@ test('Long numbers in statement file names are masked', () => {
 test('Moving a statement gives new ids that never clash with lines already there', () => {
   const mk = (account, source) => MD.makeTxn({ date: '2026-03-01', desc: 'TEA STALL', amount: -30, account, accountKind: 'card', rules: {}, source });
   const txns = MD.numberRepeats([mk('Target', 'a.pdf'), mk('Target', 'a.pdf'), mk('Wrong', 'b.pdf'), mk('Wrong', 'b.pdf'), mk('Wrong', 'c.pdf')]);
-  const moved = MD.moveStatement(txns, t => t.account === 'Wrong' && t.source === 'b.pdf', 'Target', 'card', {});
-  assert.strictEqual(moved.length, 2);
-  assert.strictEqual(new Set(txns.map(t => t.id)).size, 5);
-  assert.deepStrictEqual(txns.map(t => t.account), ['Target', 'Target', 'Target', 'Target', 'Wrong']);
+  // b.pdf holds the same two lines that a.pdf already put in Target: they are dropped, not doubled.
+  const r = MD.moveStatement(txns, t => t.account === 'Wrong' && t.source === 'b.pdf', 'Target', 'card', {});
+  assert.deepStrictEqual([r.moved.length, r.dropped, r.txns.length], [0, 2, 3]);
+  // A statement with lines Target doesn't have yet moves, with ids that don't clash.
+  const more = MD.numberRepeats([mk('Target', 'a.pdf'), mk('Wrong', 'e.pdf'), mk('Wrong', 'e.pdf')]);
+  more[1].desc = more[2].desc = 'BAKERY';
+  more[1].id = more[2].id = MD.txnId(more[1]);
+  const r2 = MD.moveStatement(more, t => t.source === 'e.pdf', 'Target', 'card', {});
+  assert.deepStrictEqual([r2.moved.length, r2.dropped], [2, 0]);
+  assert.strictEqual(new Set(r2.txns.map(t => t.id)).size, 3);
+  assert.ok(r2.txns.every(t => t.account === 'Target'));
   // A category picked by hand stays.
   const manual = [Object.assign(mk('Wrong', 'd.pdf'), { category: 'Health & fitness', manual: true })];
-  MD.moveStatement(manual, () => true, 'Target', 'card', {});
-  assert.strictEqual(manual[0].category, 'Health & fitness');
+  assert.strictEqual(MD.moveStatement(manual, () => true, 'Target', 'card', {}).moved[0].category, 'Health & fitness');
 });
 
 test('Short look-alike descriptions are not taken for the same line', () => {
   const mk = (desc, source) => MD.makeTxn({ date: '2026-03-02', desc, amount: -200, account: 'Bank', accountKind: 'bank', rules: {}, source });
   assert.strictEqual(MD.findImported([mk('UPI-RAHUL', 'a.csv')], [mk('UPI-RAHUL KUMAR', 'b.csv')]).size, 0);
+});
+
+test('Refreshing saved lines keeps repeats, merges copies from two files and fixes HDFC credits', () => {
+  const card = { kind: 'card' };
+  const line = (desc, amount, source) => ({ id: MD.txnId({ account: 'Card', date: '2026-02-02', amount, desc }), date: '2026-02-02', desc, merchant: 'Old', amount, account: 'Card', category: 'Other', source });
+  const data = {
+    accounts: { Card: card }, rules: {},
+    txns: [
+      line('TEA STALL', -30, 'a.pdf'), line('TEA STALL', -30, 'a.pdf'),       // a real repeat
+      line('TEA STALL', -30, 'b.pdf'),                                        // the same line from another file
+      line('| | 10:15 BPPY CC PAYMENT AB12 (Ref# ST12) + C', -1500, 'h.pdf'),   // saved by an older version
+      line('BAKERY', -80, '1234567890123456_01022026.pdf'),
+    ],
+  };
+  MD.refreshSaved(data);
+  assert.strictEqual(data.txns.length, 4);
+  assert.strictEqual(new Set(data.txns.map(t => t.id)).size, 4);
+  const pay = data.txns.find(t => /BPPY/.test(t.desc));
+  assert.deepStrictEqual([pay.amount, pay.category, pay.desc], [1500, 'Card payments & transfers', 'BPPY CC PAYMENT AB12']);
+  assert.ok(data.txns.some(t => t.source === 'XXXXXXXXXXXX3456_01022026.pdf'));
+  // Running it again changes nothing.
+  const ids = data.txns.map(t => t.id + t.amount).join();
+  MD.refreshSaved(data);
+  assert.strictEqual(data.txns.map(t => t.id + t.amount).join(), ids);
 });

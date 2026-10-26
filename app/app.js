@@ -97,36 +97,7 @@
   // Categories you picked yourself are kept.
   function refreshParsed() {
     if ((db.parserVersion || 1) >= MD.PARSER_VERSION) return false;
-    const firstSource = new Map();
-    db.txns = db.txns.filter(t => {
-      const kind = (db.accounts[t.account] || {}).kind || 'bank';
-      const oldKey = MD.merchantKey(t.merchant);
-      const before = t.desc;
-      t.source = MD.maskSource(t.source);
-      if (/\.pdf$/i.test(t.source || '')) {
-        // Older versions read HDFC's "+ C" card credits (bill payments) as spending.
-        if (kind === 'card' && t.amount < 0 && MD.pdfCredit(t.desc)) t.amount = -t.amount;
-        t.desc = MD.cleanPdfDesc(t.desc, kind);
-      }
-      const m = MD.extractMerchant(t.desc);
-      t.merchant = m.name;
-      const key = MD.merchantKey(m.name);
-      const own = k => Object.prototype.hasOwnProperty.call(db.rules, k);
-      if (own(oldKey) && !own(key) && key !== '__proto__') db.rules[key] = db.rules[oldKey];
-      if (!t.manual) {
-        let c = MD.categorize(t.desc, m.name, t.amount, db.rules, kind);
-        if (c === 'Other' && m.person) c = 'People (UPI)';
-        t.category = c;
-      }
-      // Keep the id unless the line itself was cleaned, so re-imports are still recognised.
-      if (t.desc !== before) t.id = MD.txnId(t);
-      t.desc = MD.redactDesc(t.desc);
-      // One id from two statements is one line imported twice; from one statement it is a real
-      // repeat (two identical small payments on one day), which numberRepeats below gives its own id.
-      if (!firstSource.has(t.id)) { firstSource.set(t.id, t.source); return true; }
-      return firstSource.get(t.id) === t.source;
-    });
-    MD.numberRepeats(db.txns);
+    MD.refreshSaved(db);
     db.parserVersion = MD.PARSER_VERSION;
     return true;
   }
@@ -1027,7 +998,8 @@
           <label class="fld" data-new>New account name<input id="mv-name" maxlength="60" placeholder="e.g. SBI Credit Card"></label>
           <label class="fld" data-new>Type<select id="mv-kind"><option value="card">Credit card</option><option value="bank">Bank account</option></select></label>
         </div>
-        <div id="mv-err" class="mt" hidden></div>`,
+        <p class="small muted" style="margin:12px 0 0">Lines that are already in the other account are not added twice.</p>
+        <div id="mv-err" class="mt" role="alert" hidden></div>`,
       foot: `<span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-mv-ok>Move</button>`,
     });
     const to = d.querySelector('#mv-to');
@@ -1040,10 +1012,11 @@
       const err = !name ? 'Give the new account a name.' : name === x.account ? 'That is the account it is in now.' : '';
       if (err) { box.hidden = false; box.innerHTML = `<div class="note err">${esc(err)}</div>`; return; }
       if (!db.accounts[name]) db.accounts[name] = { kind: d.querySelector('#mv-kind').value === 'bank' ? 'bank' : 'card' };
-      const moved = MD.moveStatement(db.txns, inStatement(x), name, db.accounts[name].kind, db.rules);
+      const r = MD.moveStatement(db.txns, inStatement(x), name, db.accounts[name].kind, db.rules);
+      db.txns = r.txns;
       pruneAccounts();
       save(); d.close(); render();
-      toast(`Moved ${moved.length} transactions to ${esc(name)}.`);
+      toast(`Moved ${r.moved.length} transactions to ${esc(name)}.${r.dropped ? ` ${r.dropped} were already there and were removed.` : ''}`);
     };
     d.querySelector('[data-mv-ok]').onclick = ok;
     d.querySelector('#mv-name').onkeydown = e => { if (e.key === 'Enter') ok(); };

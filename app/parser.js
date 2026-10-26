@@ -168,7 +168,8 @@
   }
 
   // True when a card line marks its amount as a credit with "+" before the rupee sign (HDFC).
-  const pdfCredit = text => /\+\s*(?:C|₹)\s*$/.test(text);
+  // Only HDFC's layout starts with "|", so a merchant ending in "+ C" elsewhere stays a purchase.
+  const pdfCredit = text => /^\s*\|.*\+\s*(?:C|₹)\s*$/.test(text);
 
   function titleCase(s) {
     return s.toLowerCase().replace(/\b([a-z])/g, (m, c) => c.toUpperCase()).replace(/\b(Upi|Atm|Emi|Sip|Lic|Neft|Imps|Gst|Bse|Nse|Hdfc|Sbi|Icici|Irctc|Kfc|Pvr)\b/g, w => w.toUpperCase());
@@ -377,8 +378,11 @@
   // Moves the lines that inStatement picks into another account: new ids (the account is part of
   // the id), numbered against lines already there, and categories for the new account's type.
   // Categories you picked yourself are kept. Returns the moved lines.
+  // Lines already in that account (findImported) are dropped instead of being added twice.
+  // Returns { txns, moved, dropped }.
   function moveStatement(txns, inStatement, account, accountKind, rules) {
-    const moved = txns.filter(inStatement);
+    const there = txns.filter(t => t.account === account);
+    let moved = txns.filter(inStatement);
     for (const t of moved) {
       t.account = account;
       t.id = txnId(t);
@@ -388,15 +392,57 @@
         t.category = c;
       }
     }
-    const set = new Set(moved);
-    numberRepeats([...txns.filter(t => t.account === account && !set.has(t)), ...moved]);
-    return moved;
+    const known = findImported(there, moved);
+    const drop = new Set(moved.filter((t, i) => known.has(i)));
+    moved = moved.filter(t => !drop.has(t));
+    numberRepeats([...there, ...moved]);
+    return { txns: txns.filter(t => !drop.has(t)), moved, dropped: drop.size };
+  }
+
+  // After the reader improves (PARSER_VERSION), re-clean saved lines in data ({ txns, rules,
+  // accounts }): descriptions, merchant names and categories (yours are kept), file names, and
+  // HDFC credits older versions read as spending. Rules follow a merchant whose name changes.
+  function refreshSaved(data) {
+    const firstSource = new Map();
+    const own = k => Object.prototype.hasOwnProperty.call(data.rules, k);
+    data.txns = data.txns.filter(t => {
+      const kind = (data.accounts[t.account] || {}).kind || 'bank';
+      const oldKey = merchantKey(t.merchant);
+      const before = t.desc;
+      t.source = maskSource(t.source);
+      if (/\.pdf$/i.test(t.source || '')) {
+        if (kind === 'card' && t.amount < 0 && pdfCredit(t.desc)) t.amount = -t.amount;
+        t.desc = cleanPdfDesc(t.desc, kind);
+      }
+      const m = extractMerchant(t.desc);
+      t.merchant = m.name;
+      const key = merchantKey(m.name);
+      if (own(oldKey) && !own(key) && key !== '__proto__') data.rules[key] = data.rules[oldKey];
+      if (!t.manual) {
+        let c = categorize(t.desc, m.name, t.amount, data.rules, kind);
+        if (c === 'Other' && m.person) c = 'People (UPI)';
+        t.category = c;
+      }
+      // Keep the id unless the line was cleaned (a flipped amount always comes with a cleaned
+      // line), so re-imports are still recognised.
+      if (t.desc !== before) t.id = txnId(t);
+      t.desc = redactDesc(t.desc);
+      // One id from two statements is one line imported twice. From one statement it is a real
+      // repeat: imports skip lines whose id is already saved, so one file can't come in twice.
+      if (!firstSource.has(t.id)) { firstSource.set(t.id, t.source); return true; }
+      return firstSource.get(t.id) === t.source;
+    });
+    numberRepeats(data.txns);
+    return data;
   }
 
   // Which newly read lines are already saved: the same id, or the same account, date and amount
   // with one description starting the other ("... MUMBAI" vs "... MUMBAI IN"), since two
   // downloads of one statement can be laid out differently. Each saved line matches once.
   // Returns a Set of indexes into fresh.
+  // Letters and digits a description needs before a prefix match counts, so short names
+  // ("UPI-RAHUL" vs "UPI-RAHUL KUMAR") stay apart.
+  const SAME_LINE_MIN = 16;
   function findImported(saved, fresh) {
     const ids = new Set(saved.map(t => t.id));
     const norm = d => String(d || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -411,8 +457,7 @@
       const list = pool.get(`${t.account}|${t.date}|${t.amount}`) || [];
       if (ids.has(t.id)) { const hit = list.find(x => x.id === t.id); if (hit) hit.used = true; out.add(i); return; }
       const d = norm(t.desc);
-      // 16+ letters and digits, so short names ("UPI-RAHUL" vs "UPI-RAHUL KUMAR") stay apart.
-      const hit = d.length >= 16 && list.find(x => !x.used && x.d.length >= 16 && (x.d.startsWith(d) || d.startsWith(x.d)));
+      const hit = d.length >= SAME_LINE_MIN && list.find(x => !x.used && x.d.length >= SAME_LINE_MIN && (x.d.startsWith(d) || d.startsWith(x.d)));
       if (hit) { hit.used = true; out.add(i); }
     });
     return out;
@@ -792,7 +837,7 @@
   }
 
   const PARSER_VERSION = 9;
-  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, numberRepeats, moveStatement, findImported, maskSource, pdfCredit, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
+  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, numberRepeats, moveStatement, refreshSaved, findImported, maskSource, pdfCredit, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);
