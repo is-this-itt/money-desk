@@ -461,7 +461,7 @@
         <div class="card">
           <div class="form-row">
             <div><label class="l" for="acct">Which account is this?</label><input class="input" id="acct" list="acct-list" placeholder="e.g. SBI Savings" value="${esc(importForm.account)}"><datalist id="acct-list">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist></div>
-            <div><span class="l">Type</span><div class="seg" role="group"><button data-kind="bank" aria-pressed="${importForm.kind === 'bank'}">Bank account</button><button data-kind="card" aria-pressed="${importForm.kind === 'card'}">Credit card</button></div></div>
+            <div><span class="l">Type</span><div class="seg" role="group"><button data-kind="bank" aria-pressed="${importForm.kind === 'bank'}">Bank account</button><button data-kind="card" aria-pressed="${importForm.kind === 'card'}">Credit card</button></div><div class="small muted" id="kind-note" hidden>Set by the account.</div></div>
           </div>
           <div class="drop mt" id="drop" tabindex="0" role="button" aria-label="Choose statement files">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6"><path d="M12 15V3m0 0L8 7m4-4 4 4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
@@ -488,6 +488,8 @@
     const status = $('#import-status');
     importForm.account = ($('#acct').value || '').trim();
     if (!importForm.account) { status.innerHTML = '<div class="note err">Name the account first, for example "SBI Savings".</div>'; $('#acct').focus(); return; }
+    // An account you already have keeps its own type, whatever the Type buttons show.
+    if (Object.hasOwn(db.accounts, importForm.account)) importForm.kind = db.accounts[importForm.account].kind;
     for (const f of files) {
       status.innerHTML = `<div class="note">Reading ${esc(f.name)}…</div>`;
       let res = null;
@@ -623,7 +625,7 @@
     const done = () => { const cb = pending && pending.onDone; pending = null; if (cb) cb(); };
     if ($('#do-import')) $('#do-import').onclick = () => {
       db.txns.push(...fresh);
-      db.accounts[res.opts.account] = { kind: res.opts.accountKind };
+      if (!Object.hasOwn(db.accounts, res.opts.account)) db.accounts[res.opts.account] = { kind: res.opts.accountKind };
       save();
       $('#import-preview').innerHTML = '';
       $('#import-status').innerHTML = `<div class="note">Imported ${fresh.length} transactions into <b>${esc(res.opts.account)}</b>. <a href="#" data-go="overview">See the overview</a> or import another file.</div>`;
@@ -995,7 +997,7 @@
       title: 'Move statement',
       body: `<p style="margin-top:0">Move the ${x.n} transactions dated ${fmtDate(x.from)} to ${fmtDate(x.to)} from <b>${esc(x.source)}</b> out of <b>${esc(x.account)}</b>.</p>
         <div class="form-grid">
-          <label class="fld">Move to<select id="mv-to">${others.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}<option value="">A new account…</option></select></label>
+          <label class="fld">Move to<select id="mv-to">${others.map(n => `<option value="${esc(n)}">${esc(n)} (${db.accounts[n].kind === 'card' ? 'credit card' : 'bank account'})</option>`).join('')}<option value="">A new account…</option></select></label>
           <label class="fld" data-new>New account name<input id="mv-name" maxlength="60" placeholder="e.g. SBI Credit Card"></label>
           <label class="fld" data-new>Type<select id="mv-kind"><option value="card">Credit card</option><option value="bank">Bank account</option></select></label>
         </div>
@@ -1072,12 +1074,16 @@
       drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); handleFiles([...e.dataTransfer.files]); };
       root.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { importForm.kind = b.dataset.kind; root.querySelectorAll('[data-kind]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
       const acct = $('#acct', root);
+      // An account you already have fixes the type; a new one gets a guess from its name.
       acct.oninput = () => {
         importForm.account = acct.value;
-        const known = db.accounts[acct.value.trim()];
+        const known = Object.hasOwn(db.accounts, acct.value.trim()) ? db.accounts[acct.value.trim()] : null;
         const guess = known ? known.kind : /card/i.test(acct.value) ? 'card' : /saving|bank|current|salary/i.test(acct.value) ? 'bank' : null;
         if (guess) { importForm.kind = guess; root.querySelectorAll('[data-kind]').forEach(x => x.setAttribute('aria-pressed', x.dataset.kind === guess)); }
+        root.querySelectorAll('[data-kind]').forEach(x => (x.disabled = !!known));
+        $('#kind-note', root).hidden = !known;
       };
+      acct.oninput();
     }
     // Settings
     root.querySelectorAll('[data-del-acct]').forEach(b => b.onclick = async () => {
