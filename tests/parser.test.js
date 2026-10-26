@@ -422,6 +422,9 @@ test('HDFC newer card layout: "+ C" is a credit, time and Ref# are dropped', () 
   assert.strictEqual(MD.cleanPdfDesc('| | 00:00 OFFUS EMI,PRIN NB:03, (Ref# ) C', 'card'), 'OFFUS EMI,PRIN NB:03,');
   assert.ok(MD.pdfCredit('| | 10:15 BPPY CC PAYMENT ABXX3344 (Ref# STXXXX3344) + C'));
   assert.ok(!MD.pdfCredit('| | 00:00 OFFUS EMI,PRIN NB:03, (Ref# ) C'));
+  // A merchant name ending in "+" is still a purchase.
+  assert.ok(!MD.pdfCredit('STREAMPLUS+'));
+  assert.strictEqual(MD.linesToTxns(['03/02/2026 STREAMPLUS+ MUMBAI IN 299.00', '04/02/2026 ACME PLUS+ 150.00'], opts).txns.map(t => t.amount).join(), '-299,-150');
   // Reward points that a refund takes back are not part of the merchant name.
   assert.strictEqual(MD.cleanPdfDesc('ACME TRAVELS PVT NEW DELHI IN -40', 'card'), 'ACME TRAVELS PVT NEW DELHI IN');
 });
@@ -429,4 +432,22 @@ test('HDFC newer card layout: "+ C" is a credit, time and Ref# are dropped', () 
 test('Long numbers in statement file names are masked', () => {
   assert.strictEqual(MD.maskSource('1234567890123456_01022026.pdf'), 'XXXXXXXXXXXX3456_01022026.pdf');
   assert.strictEqual(MD.maskSource('4111XXXXXXXX1111_12345_Statement.pdf'), '4111XXXXXXXX1111_12345_Statement.pdf');
+});
+
+test('Moving a statement gives new ids that never clash with lines already there', () => {
+  const mk = (account, source) => MD.makeTxn({ date: '2026-03-01', desc: 'TEA STALL', amount: -30, account, accountKind: 'card', rules: {}, source });
+  const txns = MD.numberRepeats([mk('Target', 'a.pdf'), mk('Target', 'a.pdf'), mk('Wrong', 'b.pdf'), mk('Wrong', 'b.pdf'), mk('Wrong', 'c.pdf')]);
+  const moved = MD.moveStatement(txns, t => t.account === 'Wrong' && t.source === 'b.pdf', 'Target', 'card', {});
+  assert.strictEqual(moved.length, 2);
+  assert.strictEqual(new Set(txns.map(t => t.id)).size, 5);
+  assert.deepStrictEqual(txns.map(t => t.account), ['Target', 'Target', 'Target', 'Target', 'Wrong']);
+  // A category picked by hand stays.
+  const manual = [Object.assign(mk('Wrong', 'd.pdf'), { category: 'Health & fitness', manual: true })];
+  MD.moveStatement(manual, () => true, 'Target', 'card', {});
+  assert.strictEqual(manual[0].category, 'Health & fitness');
+});
+
+test('Short look-alike descriptions are not taken for the same line', () => {
+  const mk = (desc, source) => MD.makeTxn({ date: '2026-03-02', desc, amount: -200, account: 'Bank', accountKind: 'bank', rules: {}, source });
+  assert.strictEqual(MD.findImported([mk('UPI-RAHUL', 'a.csv')], [mk('UPI-RAHUL KUMAR', 'b.csv')]).size, 0);
 });

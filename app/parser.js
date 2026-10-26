@@ -168,7 +168,7 @@
   }
 
   // True when a card line marks its amount as a credit with "+" before the rupee sign (HDFC).
-  const pdfCredit = text => /\+\s*(?:C|₹)?\s*$/.test(text);
+  const pdfCredit = text => /\+\s*(?:C|₹)\s*$/.test(text);
 
   function titleCase(s) {
     return s.toLowerCase().replace(/\b([a-z])/g, (m, c) => c.toUpperCase()).replace(/\b(Upi|Atm|Emi|Sip|Lic|Neft|Imps|Gst|Bse|Nse|Hdfc|Sbi|Icici|Irctc|Kfc|Pvr)\b/g, w => w.toUpperCase());
@@ -358,14 +358,39 @@
 
   // The same line can really happen twice (two identical small payments at one shop on one day). The second and
   // later copies get "d2", "d3"... on their id, so they are kept and a re-import still matches.
+  // Ids already in use in txns are skipped, so numbering a list that includes saved lines never
+  // gives two lines one id.
   function numberRepeats(txns) {
-    const seen = new Map();
+    const taken = new Set(), last = new Map();
     for (const t of txns) {
-      const n = (seen.get(t.id) || 0) + 1;
-      seen.set(t.id, n);
-      if (n > 1) t.id += 'd' + n;
+      if (!taken.has(t.id)) { taken.add(t.id); continue; }
+      const base = t.id;
+      let n = last.get(base) || 1;
+      do n++; while (taken.has(base + 'd' + n));
+      last.set(base, n);
+      t.id = base + 'd' + n;
+      taken.add(t.id);
     }
     return txns;
+  }
+
+  // Moves the lines that inStatement picks into another account: new ids (the account is part of
+  // the id), numbered against lines already there, and categories for the new account's type.
+  // Categories you picked yourself are kept. Returns the moved lines.
+  function moveStatement(txns, inStatement, account, accountKind, rules) {
+    const moved = txns.filter(inStatement);
+    for (const t of moved) {
+      t.account = account;
+      t.id = txnId(t);
+      if (!t.manual) {
+        let c = categorize(t.desc, t.merchant, t.amount, rules, accountKind);
+        if (c === 'Other' && extractMerchant(t.desc).person) c = 'People (UPI)';
+        t.category = c;
+      }
+    }
+    const set = new Set(moved);
+    numberRepeats([...txns.filter(t => t.account === account && !set.has(t)), ...moved]);
+    return moved;
   }
 
   // Which newly read lines are already saved: the same id, or the same account, date and amount
@@ -386,7 +411,8 @@
       const list = pool.get(`${t.account}|${t.date}|${t.amount}`) || [];
       if (ids.has(t.id)) { const hit = list.find(x => x.id === t.id); if (hit) hit.used = true; out.add(i); return; }
       const d = norm(t.desc);
-      const hit = d.length >= 8 && list.find(x => !x.used && x.d.length >= 8 && (x.d.startsWith(d) || d.startsWith(x.d)));
+      // 16+ letters and digits, so short names ("UPI-RAHUL" vs "UPI-RAHUL KUMAR") stay apart.
+      const hit = d.length >= 16 && list.find(x => !x.used && x.d.length >= 16 && (x.d.startsWith(d) || d.startsWith(x.d)));
       if (hit) { hit.used = true; out.add(i); }
     });
     return out;
@@ -766,7 +792,7 @@
   }
 
   const PARSER_VERSION = 9;
-  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, numberRepeats, findImported, maskSource, pdfCredit, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
+  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, numberRepeats, moveStatement, findImported, maskSource, pdfCredit, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);

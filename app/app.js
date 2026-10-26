@@ -981,8 +981,8 @@
           <div>${Object.keys(accts).length ? `<table class="list"><thead><tr><th>Account</th><th>Covers</th><th class="r">Transactions</th><th></th></tr></thead><tbody>${Object.entries(accts).sort().map(([n, a]) => `
             <tr><td><b>${esc(n)}</b><div class="small muted">${(db.accounts[n] || {}).kind === 'card' ? 'Credit card' : 'Bank account'}</div></td><td class="small muted">${fmtDate(a.from)} – ${fmtDate(a.to)}</td><td class="r num">${a.n}</td><td class="r"><button class="btn small danger" data-del-acct="${esc(n)}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">No accounts yet. <a href="#" data-go="import">Import a statement</a>.</p>'}</div></div>
         <div class="section"><div><h2>Imported statements</h2><div class="desc">Each file you imported. Move one that went into the wrong account, or delete it to import it again.</div></div>
-          <div>${stmts.length ? `<table class="list"><thead><tr><th>Statement</th><th>Covers</th><th class="r">Transactions</th><th></th></tr></thead><tbody>${stmts.map((x, i) => `
-            <tr><td><b class="wrap-any">${esc(x.source || 'Added by hand')}</b><div class="small muted">${esc(x.account)}</div></td><td class="small muted">${fmtDate(x.from)} – ${fmtDate(x.to)}</td><td class="r num">${x.n}</td><td class="r nowrap"><button class="btn small" data-stmt-move="${i}">Move…</button> <button class="btn small danger" data-stmt-del="${i}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">None yet.</p>'}</div></div>
+          <div>${stmts.length ? `<table class="list"><thead><tr><th>Statement</th><th>Covers</th><th class="r">Transactions</th><th></th></tr></thead><tbody>${stmts.map(x => `
+            <tr><td><b class="wrap-any">${esc(x.source)}</b><div class="small muted">${esc(x.account)}</div></td><td class="small muted">${fmtDate(x.from)} – ${fmtDate(x.to)}</td><td class="r num">${x.n}</td><td class="r nowrap"><button class="btn small" data-stmt-move="${esc(JSON.stringify([x.account, x.source]))}">Move…</button> <button class="btn small danger" data-stmt-del="${esc(JSON.stringify([x.account, x.source]))}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">None yet.</p>'}</div></div>
         <div class="section"><div><h2>Category rules</h2><div class="desc">Merchants you told Money Desk to always put in a category.</div></div>
           <div>${rules.length ? `<table class="list"><tbody>${rules.sort().map(([k, c]) => `<tr><td>${esc(k)}</td><td><span class="pill">${esc(c)}</span></td><td class="r"><button class="btn small" data-del-rule="${esc(k)}">Remove</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">None yet. When you change a category in Transactions and choose "Apply to future imports", the rule shows up here.</p>'}</div></div>
         <div class="section"><div><h2>Your data file</h2><div class="desc">${fileMode ? 'Saved on this laptop, with daily copies for 30 days.' : '<b>Not connected.</b> Open Money Desk from its Start menu shortcut so changes are saved to disk.'}</div></div>
@@ -1001,7 +1001,8 @@
   function statements() {
     const by = new Map();
     for (const t of db.txns) {
-      if (t.source === 'sample') continue;
+      // Sample data and lines added by hand are not statements.
+      if (t.source === 'sample' || !t.source) continue;
       const k = t.account + '\u0000' + t.source;
       const x = by.get(k) || { account: t.account, source: t.source, n: 0, from: t.date, to: t.date };
       by.set(k, x);
@@ -1020,7 +1021,7 @@
     const others = Object.keys(db.accounts).filter(n => n !== x.account).sort();
     const d = openDialog({
       title: 'Move statement',
-      body: `<p style="margin-top:0">Move the ${x.n} transactions from <b>${esc(x.source || 'this statement')}</b> out of <b>${esc(x.account)}</b>.</p>
+      body: `<p style="margin-top:0">Move the ${x.n} transactions from <b>${esc(x.source)}</b> out of <b>${esc(x.account)}</b>.</p>
         <div class="form-grid">
           <label class="fld">Move to<select id="mv-to">${others.map(n => `<option>${esc(n)}</option>`).join('')}<option value="">A new account…</option></select></label>
           <label class="fld" data-new>New account name<input id="mv-name" maxlength="60" placeholder="e.g. SBI Credit Card"></label>
@@ -1033,30 +1034,19 @@
     const sync = () => d.querySelectorAll('[data-new]').forEach(l => (l.hidden = to.value !== ''));
     to.onchange = sync; sync();
     d.querySelector('#mv-kind').value = (db.accounts[x.account] || {}).kind || 'card';
-    d.querySelector('[data-mv-ok]').onclick = () => {
+    const ok = () => {
       const name = (to.value || d.querySelector('#mv-name').value).trim().slice(0, 60);
       const box = d.querySelector('#mv-err');
       const err = !name ? 'Give the new account a name.' : name === x.account ? 'That is the account it is in now.' : '';
       if (err) { box.hidden = false; box.innerHTML = `<div class="note err">${esc(err)}</div>`; return; }
       if (!db.accounts[name]) db.accounts[name] = { kind: d.querySelector('#mv-kind').value === 'bank' ? 'bank' : 'card' };
-      const kind = db.accounts[name].kind;
-      const moved = db.txns.filter(inStatement(x));
-      for (const t of moved) {
-        t.account = name;
-        // The account is part of the id, so a later import into the new account is still matched.
-        t.id = MD.txnId(t);
-        if (!t.manual) {
-          const m = MD.extractMerchant(t.desc);
-          let c = MD.categorize(t.desc, t.merchant, t.amount, db.rules, kind);
-          if (c === 'Other' && m.person) c = 'People (UPI)';
-          t.category = c;
-        }
-      }
-      MD.numberRepeats(moved);
+      const moved = MD.moveStatement(db.txns, inStatement(x), name, db.accounts[name].kind, db.rules);
       pruneAccounts();
       save(); d.close(); render();
       toast(`Moved ${moved.length} transactions to ${esc(name)}.`);
     };
+    d.querySelector('[data-mv-ok]').onclick = ok;
+    d.querySelector('#mv-name').onkeydown = e => { if (e.key === 'Enter') ok(); };
   }
 
   // ---------- Wiring ----------
@@ -1115,14 +1105,17 @@
     root.querySelectorAll('[data-del-acct]').forEach(b => b.onclick = async () => {
       const n = b.dataset.delAcct;
       if (!(await confirmDialog(`Delete ${n}?`, `All ${db.txns.filter(t => t.account === n).length} transactions in "${n}" will be removed. You can import the statements again later.`, 'Delete account', true))) return;
-      db.txns = db.txns.filter(t => t.account !== n); delete db.accounts[n];
-      if (prefs.account === n) prefs.account = 'all';
+      db.txns = db.txns.filter(t => t.account !== n);
+      pruneAccounts();
       save(); render();
     });
-    root.querySelectorAll('[data-stmt-move]').forEach(b => (b.onclick = () => moveStatementDialog(statements()[+b.dataset.stmtMove])));
+    // Buttons carry [account, file] so a click always finds the statement it was drawn for.
+    const stmtOf = key => { const [a, s] = JSON.parse(key); return statements().find(x => x.account === a && x.source === s); };
+    root.querySelectorAll('[data-stmt-move]').forEach(b => (b.onclick = () => { const x = stmtOf(b.dataset.stmtMove); if (x) moveStatementDialog(x); }));
     root.querySelectorAll('[data-stmt-del]').forEach(b => b.onclick = async () => {
-      const x = statements()[+b.dataset.stmtDel];
-      if (!(await confirmDialog('Delete this statement?', `The ${x.n} transactions from "${x.source || 'this statement'}" in ${x.account} will be removed. You can import the file again later.`, 'Delete statement', true))) return;
+      const x = stmtOf(b.dataset.stmtDel);
+      if (!x) return;
+      if (!(await confirmDialog('Delete this statement?', `The ${x.n} transactions from "${x.source}" in ${x.account} will be removed. You can import the file again later.`, 'Delete statement', true))) return;
       db.txns = db.txns.filter(t => !inStatement(x)(t));
       pruneAccounts();
       save(); render();
