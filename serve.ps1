@@ -86,7 +86,8 @@ public static class MoneyDeskWindow {
   }
   [StructLayout(LayoutKind.Sequential, Pack = 4)]
   struct PropertyKey { public Guid fmtid; public uint pid; }
-  [StructLayout(LayoutKind.Explicit, Size = 16)]
+  // 24 bytes: the size on 64-bit Windows (32-bit uses 16 and ignores the rest).
+  [StructLayout(LayoutKind.Explicit, Size = 24)]
   struct PropVariant { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr str; }
 
   static readonly Guid AppUserModel = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
