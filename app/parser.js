@@ -403,9 +403,11 @@
     notes: ['notes', 'note', 'remarks', 'comments'], status: ['status', 'active'],
   };
   const TYPE_WORDS = [
-    ['Credit card', /credit|card/], ['Bank account', /bank|savings|current|account/], ['Mandate / autopay', /mandate|autopay|auto pay|nach|standing/],
-    ['SIP / investment', /sip|invest|mutual|fund|stock|ppf|nps|fd|deposit/], ['Insurance', /insur|policy|lic/], ['Loan / EMI', /loan|emi/],
-    ['Subscription', /subscri|ott|membership/], ['Other', /other/],
+    ['Bank account', /\bdebit card\b/], ['Credit card', /\bcredit\b|\bcards?\b/], ['Bank account', /\bbank\b|\bsavings\b|\bcurrent\b|\baccount\b/],
+    ['Mandate / autopay', /\bmandate|\bauto ?pay\b|\bnach\b|\bstanding\b/],
+    ['SIP / investment', /\bsips?\b|\binvest|\bmutual\b|\bfunds?\b|\bstocks?\b|\bppf\b|\bnps\b|\bfds?\b|\bdeposit/],
+    ['Insurance', /\binsur|\bpolicy\b|\blic\b/], ['Loan / EMI', /\bloans?\b|\bemis?\b/],
+    ['Subscription', /\bsubscri|\bott\b|\bmembership\b/], ['Other', /\bother\b/],
   ];
   const FREQ_WORDS = [['Monthly', /month/], ['Quarterly', /quarter/], ['Yearly', /year|annual/], ['One-time', /one|once/], ['None', /^(none|-|na|n\/a)$/]];
   const normHead = h => String(h == null ? '' : h).toLowerCase().replace(/\s+/g, ' ').trim();

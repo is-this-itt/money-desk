@@ -842,7 +842,7 @@
           <button class="btn small primary" data-imp-pick>Choose file</button>
           <input type="file" accept=".xlsx,.xls,.csv" hidden data-imp-input></div>
         <div data-imp-result></div>
-        <p class="small muted" style="margin:12px 0 0">Long numbers in any column are masked when imported. Rows already on your list are skipped.</p>`,
+        <p class="small muted" style="margin:12px 0 0">Don't put passwords, PINs or CVVs in the file. Long numbers in any column are masked when imported, and rows already on your list are skipped.</p>`,
       foot: `<span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-imp-go disabled>Import</button>`,
     });
     const go = d.querySelector('[data-imp-go]'), input = d.querySelector('[data-imp-input]'), result = d.querySelector('[data-imp-result]');
@@ -869,7 +869,7 @@
         else if (have.has(serviceKey(v)) || seen.has(serviceKey(v))) { status = have.has(serviceKey(v)) ? 'Already on your list' : 'Repeats an earlier row'; cls = ''; dup++; }
         else { seen.add(serviceKey(v)); ready.push(v); status = ['Ready'].concat(r.notes).join('. '); cls = 'ok'; }
         const shown = v || r.value;
-        return `<tr><td class="small muted num">${r.row}</td><td><b>${esc(str(shown.name, 80)) || '<span class="muted">—</span>'}</b><div class="small muted">${esc(shown.type)}</div></td>
+        return `<tr><td class="small muted num">${r.row}</td><td><b>${esc(MD.redactDesc(str(shown.name, 80))) || '<span class="muted">—</span>'}</b><div class="small muted">${esc(shown.type)}</div></td>
           <td class="small">${v ? serviceWhen(v) : ''}</td><td><span class="pill ${cls}">${esc(status)}</span></td></tr>`;
       });
       const parts = [`<b>${ready.length}</b> ready to add`, dup && `${dup} skipped as duplicates`, bad && `${bad} need fixing in the file`].filter(Boolean);

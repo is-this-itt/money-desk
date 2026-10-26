@@ -123,3 +123,9 @@ test('services template rows: aliases, padding, masking hints and problems', () 
 test('services sheet without a Name column is rejected', () => {
   assert.ok(MD.readServiceRows([['Date', 'Amount'], ['1 Oct', '5']]).error);
 });
+
+test('service type words match whole words only', () => {
+  const type = t => MD.readServiceRows([['Type', 'Name'], [t, 'x']]).rows[0].value.type;
+  assert.deepStrictEqual(['Debit card', 'card', 'FD', 'Mutual funds', 'NACH', 'self-drive', 'offday'].map(type),
+    ['Bank account', 'Credit card', 'SIP / investment', 'SIP / investment', 'Mandate / autopay', 'Other', 'Other']);
+});
