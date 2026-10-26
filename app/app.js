@@ -982,10 +982,11 @@
     return [...by.values()].sort((a, b) => a.account.localeCompare(b.account) || (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
   }
   const inStatement = x => t => t.account === x.account && t.source === x.source;
-  // Drops an account's entry once no transactions are left in it.
-  function pruneAccounts() {
+  // Drops the entries of the given accounts once no transactions are left in them. Other empty
+  // accounts (one you just added, say) are left alone.
+  function pruneAccounts(names) {
     const used = new Set(db.txns.map(t => t.account));
-    for (const n of Object.keys(db.accounts)) if (!used.has(n)) { delete db.accounts[n]; if (prefs.account === n) prefs.account = 'all'; }
+    for (const n of names) if (Object.hasOwn(db.accounts, n) && !used.has(n)) { delete db.accounts[n]; if (prefs.account === n) prefs.account = 'all'; }
   }
 
   function moveStatementDialog(x) {
@@ -1009,12 +1010,16 @@
     const ok = () => {
       const name = (to.value || d.querySelector('#mv-name').value).trim().slice(0, 60);
       const box = d.querySelector('#mv-err');
-      const err = !name ? 'Give the new account a name.' : name === x.account ? 'That is the account it is in now.' : '';
+      const isNew = !to.value;
+      const err = !name ? 'Give the new account a name.'
+        : name === x.account ? 'That is the account it is in now.'
+        : isNew && Object.hasOwn(db.accounts, name) ? `There is already an account called "${name}". Pick it under Move to.`
+        : ['__proto__', 'constructor', 'prototype'].includes(name) ? 'Pick another name for the account.' : '';
       if (err) { box.hidden = false; box.innerHTML = `<div class="note err">${esc(err)}</div>`; return; }
-      if (!db.accounts[name]) db.accounts[name] = { kind: d.querySelector('#mv-kind').value === 'bank' ? 'bank' : 'card' };
+      if (isNew) db.accounts[name] = { kind: d.querySelector('#mv-kind').value === 'bank' ? 'bank' : 'card' };
       const r = MD.moveStatement(db.txns, inStatement(x), name, db.accounts[name].kind, db.rules);
       db.txns = r.txns;
-      pruneAccounts();
+      pruneAccounts([x.account]);
       save(); d.close(); render();
       toast(`Moved ${r.moved.length} transactions to ${esc(name)}.${r.dropped ? ` ${r.dropped} were already there and were removed.` : ''}`);
     };
@@ -1079,7 +1084,7 @@
       const n = b.dataset.delAcct;
       if (!(await confirmDialog(`Delete ${n}?`, `All ${db.txns.filter(t => t.account === n).length} transactions in "${n}" will be removed. You can import the statements again later.`, 'Delete account', true))) return;
       db.txns = db.txns.filter(t => t.account !== n);
-      pruneAccounts();
+      pruneAccounts([n]);
       save(); render();
     });
     // Buttons carry [account, file] so a click always finds the statement it was drawn for.
@@ -1090,7 +1095,7 @@
       if (!x) return;
       if (!(await confirmDialog('Delete this statement?', `The ${x.n} transactions from "${x.source}" in ${x.account} will be removed. You can import the file again later.`, 'Delete statement', true))) return;
       db.txns = db.txns.filter(t => !inStatement(x)(t));
-      pruneAccounts();
+      pruneAccounts([x.account]);
       save(); render();
     });
     root.querySelectorAll('[data-del-rule]').forEach(b => b.onclick = () => { delete db.rules[b.dataset.delRule]; save(); render(); });

@@ -377,9 +377,8 @@
 
   // Moves the lines that inStatement picks into another account: new ids (the account is part of
   // the id), numbered against lines already there, and categories for the new account's type.
-  // Categories you picked yourself are kept. Returns the moved lines.
-  // Lines already in that account (findImported) are dropped instead of being added twice.
-  // Returns { txns, moved, dropped }.
+  // Categories you picked yourself are kept. Lines already in that account (findImported) are
+  // dropped instead of being added twice. Returns { txns, moved, dropped }.
   function moveStatement(txns, inStatement, account, accountKind, rules) {
     const there = txns.filter(t => t.account === account);
     let moved = txns.filter(inStatement);
@@ -392,6 +391,7 @@
         t.category = c;
       }
     }
+    numberRepeats(moved);
     const known = findImported(there, moved);
     const drop = new Set(moved.filter((t, i) => known.has(i)));
     moved = moved.filter(t => !drop.has(t));
@@ -429,6 +429,8 @@
       t.desc = redactDesc(t.desc);
       // One id from two statements is one line imported twice. From one statement it is a real
       // repeat: imports skip lines whose id is already saved, so one file can't come in twice.
+      // The trade-off: two different statements that overlap in dates and both list the very
+      // same line (same date, amount and wording) keep only one copy of it.
       if (!firstSource.has(t.id)) { firstSource.set(t.id, t.source); return true; }
       return firstSource.get(t.id) === t.source;
     });
@@ -436,13 +438,14 @@
     return data;
   }
 
+  // Letters and digits a description needs before a prefix match counts, so short names
+  // ("UPI-RAHUL" vs "UPI-RAHUL KUMAR") stay apart.
+  const SAME_LINE_MIN = 16;
+
   // Which newly read lines are already saved: the same id, or the same account, date and amount
   // with one description starting the other ("... MUMBAI" vs "... MUMBAI IN"), since two
   // downloads of one statement can be laid out differently. Each saved line matches once.
   // Returns a Set of indexes into fresh.
-  // Letters and digits a description needs before a prefix match counts, so short names
-  // ("UPI-RAHUL" vs "UPI-RAHUL KUMAR") stay apart.
-  const SAME_LINE_MIN = 16;
   function findImported(saved, fresh) {
     const ids = new Set(saved.map(t => t.id));
     const norm = d => String(d || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -455,7 +458,10 @@
     const out = new Set();
     fresh.forEach((t, i) => {
       const list = pool.get(`${t.account}|${t.date}|${t.amount}`) || [];
-      if (ids.has(t.id)) { const hit = list.find(x => x.id === t.id); if (hit) hit.used = true; out.add(i); return; }
+      if (ids.has(t.id)) {
+        const hit = list.find(x => x.id === t.id && !x.used);
+        if (hit) { hit.used = true; out.add(i); return; }
+      }
       const d = norm(t.desc);
       const hit = d.length >= SAME_LINE_MIN && list.find(x => !x.used && x.d.length >= SAME_LINE_MIN && (x.d.startsWith(d) || d.startsWith(x.d)));
       if (hit) { hit.used = true; out.add(i); }

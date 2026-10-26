@@ -441,6 +441,10 @@ test('Moving a statement gives new ids that never clash with lines already there
   // b.pdf holds the same two lines that a.pdf already put in Target: they are dropped, not doubled.
   const r = MD.moveStatement(txns, t => t.account === 'Wrong' && t.source === 'b.pdf', 'Target', 'card', {});
   assert.deepStrictEqual([r.moved.length, r.dropped, r.txns.length], [0, 2, 3]);
+  // One of the line already there and two in the moved statement: only one is dropped.
+  const one = MD.numberRepeats([mk('Target', 'a.pdf'), mk('Wrong', 'b.pdf'), mk('Wrong', 'b.pdf')]);
+  const r1 = MD.moveStatement(one, t => t.source === 'b.pdf', 'Target', 'card', {});
+  assert.deepStrictEqual([r1.moved.length, r1.dropped, r1.txns.length, new Set(r1.txns.map(t => t.id)).size], [1, 1, 2, 2]);
   // A statement with lines Target doesn't have yet moves, with ids that don't clash.
   const more = MD.numberRepeats([mk('Target', 'a.pdf'), mk('Wrong', 'e.pdf'), mk('Wrong', 'e.pdf')]);
   more[1].desc = more[2].desc = 'BAKERY';
