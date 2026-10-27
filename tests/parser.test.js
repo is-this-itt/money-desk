@@ -508,3 +508,24 @@ test('A card line with no D or C on a statement that marks them is a note, not a
   MD.refreshSaved(data);
   assert.deepStrictEqual(data.txns.map(t => t.desc), ['ONLINE STORE IN']);
 });
+
+test('Coverage lists months with no lines per card and flags old accounts as due', () => {
+  const t = (date, account, source) => ({ date, account, source, amount: -1, desc: 'X' });
+  const txns = [
+    t('2026-01-05', 'Cards', '1111XXXXXXXX2222_1_Retail.pdf'), t('2026-04-02', 'Cards', '1111XXXXXXXX2222_2_Retail.pdf'),
+    t('2026-02-10', 'Cards', '3333XXXXXXXX4444_1_Retail.pdf'), t('2026-03-10', 'Cards', '3333XXXXXXXX4444_2_Retail.pdf'),
+    t('2026-01-01', 'Bank', 'statement.xlsx'), t('2026-10-20', 'Bank', 'statement.xlsx'), t('2026-05-01', 'Bank', 'sample'),
+    t('2026-06-10', 'Solo', 'XXXXXXXX9999_01.pdf'), t('2026-08-10', 'Solo', 'MonthlyStatement.pdf'),
+  ];
+  const c = MD.coverage(txns, '2026-10-27');
+  assert.deepStrictEqual(c.map(x => [x.account, x.card, x.missing, x.due]), [
+    ['Bank', '', ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09'], false],
+    ['Cards', '2222', ['2026-02', '2026-03'], true],
+    ['Cards', '4444', [], true],
+    ['Solo', '9999', ['2026-07'], true],
+  ]);
+  // A bank account isn't split by digits in its file names, and a recent one isn't due.
+  const bank = MD.coverage([t('2026-09-01', 'B', 'XXXXXX1234_Sep.pdf'), t('2026-10-20', 'B', 'XXXXXX5678_Oct.pdf')], '2026-10-27', () => 'bank');
+  assert.deepStrictEqual(bank.map(x => [x.card, x.missing, x.due]), [['', [], false]]);
+  assert.deepStrictEqual(MD.coverage([], '2026-10-27'), []);
+});

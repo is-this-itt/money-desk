@@ -11,7 +11,8 @@
   const money = v => inr0.format(Math.round(v));
   const short = v => { const a = Math.abs(v); return a >= 1e7 ? '₹' + (v / 1e7).toFixed(1) + 'Cr' : a >= 1e5 ? '₹' + (v / 1e5).toFixed(1) + 'L' : a >= 1e3 ? '₹' + (v / 1e3).toFixed(0) + 'k' : '₹' + Math.round(v); };
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  // Both return HTML-safe text even if the stored value is not a real date.
+  // All three return HTML-safe text even if the stored value is not a real date.
+  const fmtMonth = ym => { const [y, m] = String(ym).split('-'); return esc(`${MON[+m - 1]} ${y}`); };
   const fmtDate = d => { const [y, m, dd] = String(d).split('-'); return esc(`${+dd} ${MON[+m - 1]} ${y}`); };
   const monthLabel = ym => { const [y, m] = String(ym).split('-'); return esc(`${MON[+m - 1]} ${String(y).slice(2)}`); };
   const kindOf = cat => (MD.CAT_BY_NAME[cat] || { kind: 'spend' }).kind;
@@ -944,6 +945,7 @@
     }
     const rules = Object.entries(db.rules);
     const stmts = statements();
+    const cover = MD.coverage(db.txns, new Date().toISOString().slice(0, 10), n => (db.accounts[n] || {}).kind);
     const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
     return `
       <div class="top"><div><h1>Settings</h1><div class="sub">Appearance, accounts, category rules and your data file</div></div></div>
@@ -953,6 +955,9 @@
         <div class="section"><div><h2>Accounts</h2><div class="desc">Every account you have imported statements for.</div></div>
           <div>${Object.keys(accts).length ? `<table class="list"><thead><tr><th>Account</th><th>Covers</th><th class="r">Transactions</th><th></th></tr></thead><tbody>${Object.entries(accts).sort().map(([n, a]) => `
             <tr><td><b>${esc(n)}</b><div class="small muted">${(db.accounts[n] || {}).kind === 'card' ? 'Credit card' : 'Bank account'}</div></td><td class="small muted">${fmtDate(a.from)} – ${fmtDate(a.to)}</td><td class="r num">${a.n}</td><td class="r"><button class="btn small danger" data-del-acct="${esc(n)}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">No accounts yet. <a href="#" data-go="import">Import a statement</a>.</p>'}</div></div>
+        <div class="section"><div><h2>Statement check</h2><div class="desc">Months with no transactions, and accounts whose newest statement is probably out. Cards in one account are checked separately.</div></div>
+          <div>${cover.length ? `<table class="list"><thead><tr><th>Account</th><th>Covers</th><th>Status</th></tr></thead><tbody>${cover.map(x => `
+            <tr><td><b>${esc(x.account)}</b>${x.card ? `<div class="small muted">Card ending ${esc(x.card)}</div>` : cover.some(y => y.account === x.account && y.card) ? '<div class="small muted">Files without card digits in their name</div>' : ''}</td><td class="small muted nowrap">${fmtDate(x.from)} – ${fmtDate(x.to)}</td><td class="small">${x.missing.length ? `<div>No transactions in ${x.missing.map(fmtMonth).join(', ')}. A statement may be missing.</div>` : ''}${x.due ? `<div>Newest transaction is from ${fmtDate(x.to)}. A newer statement is probably out.</div>` : ''}${!x.missing.length && !x.due ? '<span class="muted">Up to date</span>' : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">Nothing to check yet.</p>'}</div></div>
         <div class="section"><div><h2>Imported statements</h2><div class="desc">Each file you imported. Move one that went into the wrong account, or delete it to import it again.</div></div>
           <div>${stmts.length ? `<table class="list"><thead><tr><th>Statement</th><th>Covers</th><th class="r">Transactions</th><th></th></tr></thead><tbody>${stmts.map(x => `
             <tr><td><b class="wrap-any">${esc(x.source)}</b><div class="small muted">${esc(x.account)}</div></td><td class="small muted">${fmtDate(x.from)} – ${fmtDate(x.to)}</td><td class="r num">${x.n}</td><td class="r nowrap"><button class="btn small" data-stmt-move="${esc(JSON.stringify([x.account, x.source]))}">Move…</button> <button class="btn small danger" data-stmt-del="${esc(JSON.stringify([x.account, x.source]))}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">None yet.</p>'}</div></div>
