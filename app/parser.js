@@ -862,8 +862,51 @@
     return lines.join('\n');
   }
 
+  // Which months each account (and each card inside it, told apart by the card digits left in
+  // masked file names) has lines for. Months between the first and last line with no lines at
+  // all are listed as missing, since a statement was probably never imported. `due` means the
+  // newest line is over 35 days before `today` (YYYY-MM-DD), so a newer statement is likely out.
+  const CARD_IN_NAME = /X{4,}(\d{2,4})[_-]/i;
+  function coverage(txns, today) {
+    const by = new Map();
+    for (const t of txns) {
+      if (!t.source || t.source === 'sample') continue;
+      const m = String(t.source).match(CARD_IN_NAME);
+      const key = t.account + '\u0000' + (m ? m[1] : '');
+      let g = by.get(key);
+      if (!g) by.set(key, (g = { account: t.account, card: m ? m[1] : '', months: new Set(), from: t.date, to: t.date }));
+      g.months.add(t.date.slice(0, 7));
+      if (t.date < g.from) g.from = t.date;
+      if (t.date > g.to) g.to = t.date;
+    }
+    // Files without card digits belong to the account's only card when it has just one.
+    for (const g of [...by.values()]) {
+      if (g.card) continue;
+      const cards = [...by.values()].filter(x => x.account === g.account && x.card);
+      if (cards.length !== 1) continue;
+      const c = cards[0];
+      g.months.forEach(m => c.months.add(m));
+      if (g.from < c.from) c.from = g.from;
+      if (g.to > c.to) c.to = g.to;
+      by.delete(g.account + '\u0000');
+    }
+    const dueBefore = new Date(Date.parse(today) - 35 * 864e5).toISOString().slice(0, 10);
+    return [...by.values()].map(g => {
+      const missing = [];
+      let [y, mo] = g.from.slice(0, 7).split('-').map(Number);
+      const last = g.to.slice(0, 7);
+      for (;;) {
+        if (++mo > 12) { mo = 1; y++; }
+        const ym = `${y}-${String(mo).padStart(2, '0')}`;
+        if (ym >= last) break;
+        if (!g.months.has(ym)) missing.push(ym);
+      }
+      return { account: g.account, card: g.card, from: g.from, to: g.to, missing, due: g.to < dueBefore };
+    }).sort((a, b) => a.account.localeCompare(b.account) || a.card.localeCompare(b.card));
+  }
+
   const PARSER_VERSION = 9;
-  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, numberRepeats, moveStatement, refreshSaved, findImported, maskSource, pdfCredit, lineShape, readingReport, readingReportText, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
+  const api = { PARSER_VERSION, sbiParts, cleanPdfDesc, redactDesc, CATEGORIES, CAT_BY_NAME, parseDate, parseAmount, detectColumns, rowsToTxns, linesToTxns, itemsToLines, extractMerchant, categorize, makeTxn, merchantKey, findRecurring, txnId, numberRepeats, moveStatement, refreshSaved, findImported, maskSource, pdfCredit, lineShape, readingReport, readingReportText, coverage, SVC_TYPES, SVC_FREQ, SVC_COLUMNS, readServiceRows, readServiceBook, serviceTemplateBook, planServiceImport, serviceKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MD = api;
 })(typeof window !== 'undefined' ? window : globalThis);
