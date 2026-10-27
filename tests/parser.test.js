@@ -524,4 +524,8 @@ test('Coverage lists months with no lines per card and flags old accounts as due
     ['Cards', '4444', [], true],
     ['Solo', '9999', ['2026-07'], true],
   ]);
+  // A bank account isn't split by digits in its file names, and a recent one isn't due.
+  const bank = MD.coverage([t('2026-09-01', 'B', 'XXXXXX1234_Sep.pdf'), t('2026-10-20', 'B', 'XXXXXX5678_Oct.pdf')], '2026-10-27', () => 'bank');
+  assert.deepStrictEqual(bank.map(x => [x.card, x.missing, x.due]), [['', [], false]]);
+  assert.deepStrictEqual(MD.coverage([], '2026-10-27'), []);
 });

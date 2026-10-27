@@ -866,12 +866,13 @@
   // masked file names) has lines for. Months between the first and last line with no lines at
   // all are listed as missing, since a statement was probably never imported. `due` means the
   // newest line is over 35 days before `today` (YYYY-MM-DD), so a newer statement is likely out.
+  // kindOf(account) gives 'card' or 'bank'; only card accounts are split by card.
   const CARD_IN_NAME = /X{4,}(\d{2,4})[_-]/i;
-  function coverage(txns, today) {
+  function coverage(txns, today, kindOf = () => 'card') {
     const by = new Map();
     for (const t of txns) {
       if (!t.source || t.source === 'sample') continue;
-      const m = String(t.source).match(CARD_IN_NAME);
+      const m = kindOf(t.account) === 'card' && String(t.source).match(CARD_IN_NAME);
       const key = t.account + '\u0000' + (m ? m[1] : '');
       let g = by.get(key);
       if (!g) by.set(key, (g = { account: t.account, card: m ? m[1] : '', months: new Set(), from: t.date, to: t.date }));
